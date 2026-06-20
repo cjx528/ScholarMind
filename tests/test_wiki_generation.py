@@ -1,5 +1,6 @@
 from packages.ai.graph_service import (
     _fallback_topic_overview,
+    _merge_seminal_with_external,
     _sanitize_wiki_text,
     repair_topic_wiki_payload,
 )
@@ -73,3 +74,38 @@ def test_repair_topic_wiki_payload_replaces_bad_history_content() -> None:
     assert "灾难性遗忘" in content["overview"]
     assert "provider=" not in content["sections"][0]["content"]
     assert repaired["markdown"].startswith("# continual learning")
+
+
+def test_external_high_citation_papers_merge_into_seminal_timeline() -> None:
+    timeline = {
+        "keyword": "continual learning",
+        "seminal": [
+            {
+                "paper_id": "local-1",
+                "title": "Local Continual Learning Paper",
+                "year": 2024,
+                "indegree": 1,
+                "outdegree": 0,
+                "pagerank": 0.0,
+                "seminal_score": 1.0,
+            }
+        ],
+        "milestones": [],
+        "timeline": [],
+    }
+    merged = _merge_seminal_with_external(
+        timeline,
+        [
+            {
+                "title": "Overcoming catastrophic forgetting in neural networks",
+                "year": 2017,
+                "citationCount": 12000,
+                "source": "semantic_scholar",
+                "source_id": "paper-1",
+            }
+        ],
+    )
+
+    assert merged["seminal"][0]["external"] is True
+    assert merged["seminal"][0]["citation_count"] == 12000
+    assert merged["seminal"][0]["source"] == "semantic_scholar"

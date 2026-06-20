@@ -322,6 +322,9 @@ export interface TimelineEntry {
   pagerank: number;
   seminal_score: number;
   why_seminal?: string;
+  external?: boolean;
+  source?: string;
+  citation_count?: number;
 }
 
 export interface TimelineResponse {
@@ -363,6 +366,8 @@ export interface ScholarMetadataItem {
   venue?: string;
   fieldsOfStudy?: string[];
   tldr?: string;
+  source?: string;
+  externalSource?: string;
 }
 
 export interface TopicWikiContent {

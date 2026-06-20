@@ -703,7 +703,7 @@ function TopicWikiView({
       {/* 最具影响力论文 */}
       {timeline?.seminal?.length > 0 && (
         <Card>
-          <CardHeader title="最具影响力论文" description="基于论文关系和引用度计算" />
+          <CardHeader title="最具影响力论文" description="融合本地引用图与联网外部引用量" />
           <div className="grid gap-3 sm:grid-cols-2">
             {timeline.seminal.slice(0, 8).map((s, i) => (
               <div
@@ -718,7 +718,17 @@ function TopicWikiView({
                   <div className="text-ink-tertiary mt-1 flex items-center gap-2 text-xs">
                     <span>{s.year}</span>
                     <span>·</span>
-                    <span>影响力 {s.seminal_score.toFixed(2)}</span>
+                    {s.external && s.citation_count != null ? (
+                      <span>{s.citation_count.toLocaleString()} 引用</span>
+                    ) : (
+                      <span>影响力 {s.seminal_score.toFixed(2)}</span>
+                    )}
+                    {s.external && (
+                      <>
+                        <span>·</span>
+                        <span className="text-primary">外部 {s.source || "source"}</span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -991,8 +1001,8 @@ function ScholarMetadataCard({ items }: { items: ScholarMetadataItem[] }) {
   return (
     <Card>
       <CardHeader
-        title="Semantic Scholar 元数据"
-        description="外部学术数据库补充信息"
+        title="外部学术证据"
+        description="联网搜索补充的高影响力论文与元数据"
         action={<ExternalLink className="text-primary h-5 w-5" />}
       />
       <div className="grid gap-3 sm:grid-cols-2">
@@ -1016,6 +1026,11 @@ function ScholarMetadataCard({ items }: { items: ScholarMetadataItem[] }) {
               {item.venue && (
                 <span className="bg-page text-ink-tertiary inline-flex items-center rounded-md px-2 py-0.5 text-xs">
                   {item.venue}
+                </span>
+              )}
+              {(item.externalSource || item.source) && (
+                <span className="bg-primary/10 text-primary inline-flex items-center rounded-md px-2 py-0.5 text-xs">
+                  {item.externalSource || item.source}
                 </span>
               )}
             </div>

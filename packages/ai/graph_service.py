@@ -26,6 +26,8 @@ from packages.config import get_settings
 from packages.domain.schemas import PaperCreate
 from packages.integrations.citation_provider import CitationProvider
 from packages.integrations.llm_client import LLMClient
+from packages.integrations.openalex_search_client import OpenAlexSearchClient
+from packages.integrations.semantic_scholar_search_client import SemanticScholarSearchClient
 from packages.storage.db import session_scope
 from packages.storage.models import PaperTopic
 from packages.storage.repositories import (
@@ -113,6 +115,162 @@ def _paper_year(item: dict) -> int | None:
     if isinstance(year, str) and year.isdigit():
         return int(year)
     return None
+
+
+def _title_key(title: str) -> str:
+    return re.sub(r"\s+", " ", title.strip().lower())
+
+
+def _coerce_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _metadata_citation_count(item: dict) -> int:
+    for key in (
+        "citationCount",
+        "citation_count",
+        "cited_by_count",
+        "influentialCitationCount",
+        "influential_citation_count",
+    ):
+        value = _coerce_int(item.get(key))
+        if value is not None:
+            return value
+    return 0
+
+
+def _paper_create_to_scholar_metadata(paper: PaperCreate, source: str) -> dict:
+    meta = paper.metadata or {}
+    citation_count = (
+        _coerce_int(meta.get("citation_count"))
+        or _coerce_int(meta.get("cited_by_count"))
+        or 0
+    )
+    influential_count = _coerce_int(meta.get("influential_citation_count"))
+    abstract = paper.abstract or ""
+    tldr = ""
+    if abstract.startswith("[TL;DR]"):
+        first_line, _, rest = abstract.partition("\n")
+        tldr = first_line.replace("[TL;DR]", "").strip()
+        abstract = rest.strip() or abstract
+    if not tldr and abstract:
+        tldr = abstract[:260]
+    year = paper.publication_date.year if isinstance(paper.publication_date, date) else None
+    return {
+        "title": paper.title,
+        "year": year,
+        "citationCount": citation_count,
+        "influentialCitationCount": influential_count,
+        "venue": meta.get("venue"),
+        "fieldsOfStudy": meta.get("fieldsOfStudy") or [],
+        "tldr": tldr,
+        "source": source,
+        "externalSource": source,
+        "source_id": paper.source_id,
+        "doi": paper.doi,
+        "arxiv_id": paper.arxiv_id or meta.get("arxiv_id"),
+        "openalex_url": meta.get("openalex_url"),
+        "abstract": abstract,
+    }
+
+
+def _merge_scholar_metadata(*groups: list[dict], max_items: int = 16) -> list[dict]:
+    merged: dict[str, dict] = {}
+    for group in groups:
+        for item in group or []:
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            key = _title_key(title)
+            current = merged.get(key)
+            if current is None or _metadata_citation_count(item) > _metadata_citation_count(current):
+                merged[key] = dict(item)
+            elif current is not None:
+                current.update({k: v for k, v in item.items() if v and not current.get(k)})
+    return sorted(
+        merged.values(),
+        key=lambda item: (
+            -_metadata_citation_count(item),
+            -(_coerce_int(item.get("year")) or 0),
+            str(item.get("title") or ""),
+        ),
+    )[:max_items]
+
+
+def _external_metadata_to_paper_context(items: list[dict], start_index: int = 1) -> list[dict]:
+    contexts: list[dict] = []
+    for item in items:
+        contexts.append(
+            {
+                "title": item.get("title", ""),
+                "year": item.get("year"),
+                "abstract": item.get("abstract") or item.get("tldr") or "",
+                "analysis": (
+                    f"联网外部发现来源={item.get('source') or 'external'}，"
+                    f"引用数={_metadata_citation_count(item)}。"
+                ),
+                "has_embedding": False,
+                "external": True,
+                "source_ref": f"[X{start_index + len(contexts)}]",
+            }
+        )
+    return contexts
+
+
+def _merge_seminal_with_external(timeline: dict, external_meta: list[dict], limit: int = 12) -> dict:
+    merged_timeline = dict(timeline or {})
+    seen: set[str] = set()
+    merged: list[dict] = []
+
+    for item in merged_timeline.get("seminal", []) or []:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        seen.add(_title_key(title))
+        merged.append(dict(item))
+
+    for item in external_meta:
+        title = str(item.get("title") or "").strip()
+        if not title or _title_key(title) in seen:
+            continue
+        citations = _metadata_citation_count(item)
+        if citations <= 0:
+            continue
+        seen.add(_title_key(title))
+        source = str(item.get("source") or item.get("externalSource") or "external")
+        merged.append(
+            {
+                "paper_id": f"external:{source}:{item.get('source_id') or title[:64]}",
+                "title": title,
+                "year": _coerce_int(item.get("year")) or 1900,
+                "indegree": citations,
+                "outdegree": 0,
+                "pagerank": 0.0,
+                "seminal_score": math.log1p(citations),
+                "why_seminal": f"外部实时检索：{source} citation_count={citations}",
+                "external": True,
+                "source": source,
+                "citation_count": citations,
+            }
+        )
+
+    merged.sort(
+        key=lambda item: (
+            -float(item.get("seminal_score") or 0),
+            -int(item.get("year") or 0),
+            str(item.get("title") or ""),
+        )
+    )
+    merged_timeline["seminal"] = merged[:limit]
+    return merged_timeline
 
 
 def _topic_source_papers(
@@ -412,6 +570,40 @@ class GraphService:
         self.scholar = self.citations
         self.llm = LLMClient()
         self.context_gatherer = WikiContextGatherer()
+
+    def _fetch_external_topic_metadata(self, keyword: str, max_results: int = 8) -> list[dict]:
+        """Live external discovery for topic Wiki context; does not ingest papers."""
+        candidates: list[dict] = []
+        searchers = [
+            (
+                "openalex",
+                OpenAlexSearchClient(email=self.settings.openalex_email),
+                min(max_results, 8),
+            )
+        ]
+        if self.settings.semantic_scholar_api_key:
+            searchers.append(
+                (
+                    "semantic_scholar",
+                    SemanticScholarSearchClient(api_key=self.settings.semantic_scholar_api_key),
+                    min(max_results, 8),
+                )
+            )
+        else:
+            logger.info("Skipping Semantic Scholar topic search because no API key is configured")
+        for source, client, limit in searchers:
+            try:
+                papers = client.search_papers(keyword, max_results=limit)
+                candidates.extend(
+                    _paper_create_to_scholar_metadata(paper, source) for paper in papers
+                )
+            except Exception as exc:
+                logger.warning("External wiki search failed for %s/%s: %s", source, keyword, exc)
+            finally:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
+        return _merge_scholar_metadata(candidates, max_items=max_results)
 
     def sync_citations_for_paper(self, paper_id: str, limit: int = 8) -> dict:
         with session_scope() as session:
@@ -1659,19 +1851,33 @@ class GraphService:
         citation_contexts = ctx.get("citation_contexts", [])[:30]
         pdf_excerpts = ctx.get("pdf_excerpts", [])[:5]
 
-        # Phase 2: Semantic Scholar 元数据增强
-        scholar_meta: list[dict] = []
+        _progress(0.2, "联网补充高影响力论文...")
+        external_meta = self._fetch_external_topic_metadata(keyword, max_results=8)
+        external_contexts = _external_metadata_to_paper_context(
+            external_meta,
+            start_index=len(paper_contexts) + 1,
+        )
+
+        # Phase 2: 外部学术元数据增强
+        local_scholar_meta: list[dict] = []
         try:
             top_titles = [s["title"] for s in tl.get("seminal", [])[:8] if s.get("title")]
-            scholar_meta = self.scholar.fetch_batch_metadata(top_titles, max_papers=8)
+            local_scholar_meta = self.scholar.fetch_batch_metadata(top_titles, max_papers=8)
         except Exception as exc:
             logger.warning("Scholar metadata fetch failed: %s", exc)
+        scholar_meta = _merge_scholar_metadata(
+            external_meta,
+            local_scholar_meta,
+            max_items=16,
+        )
+        source_contexts = paper_contexts + external_contexts[:8]
+        enriched_tl = _merge_seminal_with_external(tl, external_meta, limit=12)
 
         _progress(0.25, "生成文章大纲...")
         # Phase 3: 多轮生成 — 先生成大纲
         outline_prompt = build_wiki_outline_prompt(
             keyword=keyword,
-            paper_summaries=paper_contexts,
+            paper_summaries=source_contexts,
             citation_contexts=citation_contexts,
             scholar_metadata=scholar_meta,
             pdf_excerpts=pdf_excerpts,
@@ -1693,14 +1899,14 @@ class GraphService:
 
         # Phase 4: 并行章节生成（直接输出 markdown 文本）
         all_sources_text = self._build_all_sources_text(
-            paper_contexts,
+            source_contexts,
             citation_contexts,
             scholar_meta,
             pdf_excerpts,
         )
         sec_plans = outline.get("outline", [])[:5]
         if outline_result.is_pseudo or not sec_plans:
-            sec_plans = _fallback_section_plans(keyword, paper_contexts)
+            sec_plans = _fallback_section_plans(keyword, source_contexts)
         _progress(0.35, f"并行生成 {len(sec_plans)} 个章节...")
         sections = self._generate_sections_parallel(
             keyword,
@@ -1719,7 +1925,7 @@ class GraphService:
         section_titles = ", ".join(s.get("title", "") for s in sections)
         survey_overview = survey_data.get("summary", {}).get("overview", "")[:600]
         overview_sources = []
-        for idx, paper in enumerate(paper_contexts[:8], 1):
+        for idx, paper in enumerate(source_contexts[:10], 1):
             title = paper.get("title") or "N/A"
             year = paper.get("year") or "?"
             abstract = (paper.get("abstract") or "")[:280]
@@ -1732,6 +1938,8 @@ class GraphService:
             f"请为「{keyword}」主题撰写一段 300-500 字的概述，"
             "涵盖该主题的定义、重要性、核心思想和发展脉络。\n"
             "必须基于给定论文资料写，不要输出系统提示、provider、model 或 summary 字段。\n"
+            "影响力判断要同时参考本地论文库和联网外部发现的高引用论文，"
+            "不要默认本地库就是完整领域全集。\n"
             "不要泛泛而谈，要点名关键问题、方法谱系和可验证的论文证据。\n"
             "直接输出文本，不要用 JSON 或代码块包裹。\n\n"
             f"已有章节: {section_titles}\n"
@@ -1758,10 +1966,10 @@ class GraphService:
         if not overview_text:
             overview_text = _fallback_topic_overview(
                 keyword=keyword,
-                paper_contexts=paper_contexts,
+                paper_contexts=source_contexts,
                 sections=sections,
                 survey_data=survey_data,
-                timeline=tl,
+                timeline=enriched_tl,
             )
 
         # 5b: 结构化汇总（key_findings + future_directions）
@@ -1771,6 +1979,7 @@ class GraphService:
             f"概述: {overview_text[:300]}\n"
             f"章节: {section_titles}\n"
             f"参考: {survey_overview[:300]}\n\n"
+            f"外部高影响力论文: {', '.join(str(item.get('title', '')) for item in external_meta[:5])}\n\n"
             '输出: {"key_findings": ["发现1","发现2","发现3"],'
             ' "future_directions": ["方向1","方向2","方向3"],'
             ' "reading_list": ["论文1","论文2"]}'
@@ -1791,7 +2000,7 @@ class GraphService:
             summary_data = _fallback_topic_summary_data(
                 keyword=keyword,
                 sections=sections,
-                paper_contexts=paper_contexts,
+                paper_contexts=source_contexts,
             )
 
         # 组装最终 wiki_content
@@ -1805,6 +2014,7 @@ class GraphService:
             "citation_contexts": citation_contexts[:20],
             "pdf_excerpts": pdf_excerpts,
             "scholar_metadata": scholar_meta,
+            "external_discovery": external_meta,
         }
 
         # 备用 markdown
@@ -1815,7 +2025,7 @@ class GraphService:
             "keyword": keyword,
             "markdown": markdown,
             "wiki_content": wiki_content,
-            "timeline": tl,
+            "timeline": enriched_tl,
             "survey": survey_data,
         }
 
