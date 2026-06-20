@@ -365,19 +365,12 @@ export interface ScholarMetadataItem {
   tldr?: string;
 }
 
-export interface WikiReadingItem {
-  title: string;
-  year?: number;
-  reason: string;
-}
-
 export interface TopicWikiContent {
   overview: string;
   sections: WikiSection[];
   key_findings: string[];
   methodology_evolution: string;
   future_directions: string[];
-  reading_list: WikiReadingItem[];
   citation_contexts?: string[];
   pdf_excerpts?: PdfExcerpt[];
   scholar_metadata?: ScholarMetadataItem[];
@@ -390,7 +383,6 @@ export interface PaperWikiContent {
   significance: string;
   limitations: string[];
   related_work_analysis: string;
-  reading_suggestions: WikiReadingItem[];
   citation_contexts?: string[];
   pdf_excerpts?: PdfExcerpt[];
   scholar_metadata?: ScholarMetadataItem[];

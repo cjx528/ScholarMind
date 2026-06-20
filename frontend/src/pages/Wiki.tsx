@@ -11,7 +11,6 @@ import type {
   TopicWikiContent,
   PaperWikiContent,
   WikiSection,
-  WikiReadingItem,
   TimelineEntry,
   PdfExcerpt,
   ScholarMetadataItem,
@@ -29,7 +28,6 @@ import {
   ChevronRight,
   Lightbulb,
   TrendingUp,
-  BookMarked,
   AlertCircle,
   Layers,
   Star,
@@ -793,17 +791,6 @@ function TopicWikiView({
         </Card>
       )}
 
-      {/* 推荐阅读 */}
-      {content.reading_list?.length > 0 && (
-        <Card>
-          <CardHeader title="推荐阅读" action={<BookMarked className="text-primary h-5 w-5" />} />
-          <div className="space-y-3">
-            {content.reading_list.map((item, i) => (
-              <ReadingListItem key={item.title || `reading-${i}`} item={item} />
-            ))}
-          </div>
-        </Card>
-      )}
     </div>
   );
 }
@@ -913,17 +900,6 @@ function PaperWikiView({
         </Card>
       )}
 
-      {/* 推荐阅读 */}
-      {content.reading_suggestions?.length > 0 && (
-        <Card>
-          <CardHeader title="推荐阅读" action={<BookMarked className="text-primary h-5 w-5" />} />
-          <div className="space-y-3">
-            {content.reading_suggestions.map((item, i) => (
-              <ReadingListItem key={item.title || `suggestion-${i}`} item={item} />
-            ))}
-          </div>
-        </Card>
-      )}
     </div>
   );
 }
@@ -1075,28 +1051,6 @@ function TimelineView({ entries }: { entries: TimelineEntry[] }) {
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function ReadingListItem({ item }: { item: WikiReadingItem }) {
-  return (
-    <div className="border-border hover:border-primary/30 flex gap-3 rounded-lg border p-3 transition-colors">
-      <div className="bg-primary/10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
-        <BookMarked className="text-primary h-4 w-4" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-ink text-sm font-medium">{item.title}</p>
-        <div className="mt-0.5 flex items-center gap-2">
-          {item.year && <span className="text-ink-tertiary text-xs">{item.year}</span>}
-          {item.reason && (
-            <>
-              {item.year && <span className="text-ink-tertiary text-xs">·</span>}
-              <span className="text-ink-secondary text-xs">{item.reason}</span>
-            </>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
