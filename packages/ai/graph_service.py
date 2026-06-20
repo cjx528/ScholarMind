@@ -9,9 +9,9 @@ import logging
 import math
 import re
 from collections import defaultdict, deque
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
+from typing import TYPE_CHECKING
 
 from packages.ai.prompts import (
     build_evolution_prompt,
@@ -34,7 +34,371 @@ from packages.storage.repositories import (
     TopicRepository,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 logger = logging.getLogger(__name__)
+
+_PSEUDO_OUTPUT_RE = re.compile(
+    r"^\s*\[[\w.-]+\]\s+provider=.*?;\s*model=.*?;\s*summary=",
+    re.IGNORECASE | re.DOTALL,
+)
+_PROMPT_LEAK_MARKERS = (
+    "直接输出文本",
+    "不要用 JSON",
+    "不要输出 JSON",
+    "不要代码块",
+    "输出要求",
+    "写作要求",
+    "请只输出单个 JSON",
+    "你是世界顶级",
+    "你是一位世界顶级",
+)
+
+
+def _strip_markdown_fence(text: str | None) -> str:
+    cleaned = (text or "").strip()
+    cleaned = re.sub(r"^```(?:markdown|json)?\s*\n?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+    return cleaned.strip()
+
+
+def _looks_like_prompt_or_pseudo(text: str, keyword: str = "") -> bool:
+    head = text[:500]
+    if _PSEUDO_OUTPUT_RE.search(head):
+        return True
+    if "[wiki_" in head and "summary=" in head:
+        return True
+    if all(marker in head for marker in ("provider=", "model=", "summary=")):
+        return True
+    if any(marker in head for marker in _PROMPT_LEAK_MARKERS):
+        return True
+    return bool(keyword and f"请为「{keyword}」" in head)
+
+
+def _sanitize_wiki_text(
+    text: str | None,
+    *,
+    keyword: str = "",
+    min_chars: int = 60,
+    is_pseudo: bool = False,
+) -> str:
+    cleaned = _strip_markdown_fence(text)
+    if not cleaned or is_pseudo:
+        return ""
+    if _looks_like_prompt_or_pseudo(cleaned, keyword):
+        return ""
+    if len(cleaned) < min_chars:
+        return ""
+    return cleaned
+
+
+def _ensure_sentence_end(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+    if stripped[-1] not in "。！？.!?":
+        return f"{stripped}。"
+    return stripped
+
+
+def _paper_title(item: dict) -> str:
+    return str(item.get("title") or "").strip()
+
+
+def _paper_year(item: dict) -> int | None:
+    year = item.get("year")
+    if isinstance(year, int):
+        return year
+    if isinstance(year, str) and year.isdigit():
+        return int(year)
+    return None
+
+
+def _topic_source_papers(
+    paper_contexts: list[dict] | None,
+    timeline: dict | None,
+) -> list[dict]:
+    papers: list[dict] = []
+    seen: set[str] = set()
+    for source in (
+        list(paper_contexts or []),
+        list((timeline or {}).get("seminal", []) or []),
+        list((timeline or {}).get("milestones", []) or []),
+        list((timeline or {}).get("timeline", []) or []),
+    ):
+        for item in source:
+            if not isinstance(item, dict):
+                continue
+            title = _paper_title(item)
+            if not title or title.lower() in seen:
+                continue
+            seen.add(title.lower())
+            papers.append(item)
+    return papers
+
+
+def _source_refs(count: int, limit: int = 3) -> list[str]:
+    return [f"[P{i}]" for i in range(1, min(count, limit) + 1)]
+
+
+def _fallback_section_plans(keyword: str, paper_contexts: list[dict]) -> list[dict]:
+    refs = _source_refs(len(paper_contexts))
+    return [
+        {
+            "section_title": "背景与问题定义",
+            "key_points": [f"界定 {keyword} 的研究对象", "说明核心问题与评价目标"],
+            "source_refs": refs,
+        },
+        {
+            "section_title": "主要方法谱系",
+            "key_points": ["归纳已有方法类别", "比较不同方法的适用条件"],
+            "source_refs": refs,
+        },
+        {
+            "section_title": "代表性论文与证据",
+            "key_points": ["提炼本地论文库中的代表性工作", "说明这些工作如何支撑主题脉络"],
+            "source_refs": refs,
+        },
+        {
+            "section_title": "技术挑战与局限",
+            "key_points": ["总结当前方法仍未解决的问题", "指出实验与部署中的主要限制"],
+            "source_refs": refs,
+        },
+        {
+            "section_title": "最新趋势与未来方向",
+            "key_points": ["结合新近论文判断发展趋势", "提出后续阅读与研究切入点"],
+            "source_refs": refs,
+        },
+    ]
+
+
+def _fallback_topic_overview(
+    *,
+    keyword: str,
+    paper_contexts: list[dict] | None,
+    sections: list[dict] | None,
+    survey_data: dict | None,
+    timeline: dict | None,
+) -> str:
+    survey_overview = ""
+    if isinstance(survey_data, dict):
+        summary = survey_data.get("summary")
+        if isinstance(summary, dict):
+            survey_overview = _sanitize_wiki_text(
+                str(summary.get("overview") or ""),
+                keyword=keyword,
+                min_chars=20,
+            )
+
+    papers = _topic_source_papers(paper_contexts, timeline)
+    years = sorted({year for paper in papers if (year := _paper_year(paper)) is not None})
+    titles = [_paper_title(paper) for paper in papers[:5] if _paper_title(paper)]
+    section_titles = [
+        str(sec.get("title") or sec.get("section_title") or "").strip()
+        for sec in (sections or [])
+        if isinstance(sec, dict)
+    ]
+    section_titles = [title for title in section_titles if title][:5]
+
+    parts: list[str] = []
+    if survey_overview:
+        parts.append(_ensure_sentence_end(survey_overview))
+    else:
+        parts.append(
+            f"「{keyword}」是当前知识库中需要系统梳理的研究主题。"
+            "这类主题不能只停留在关键词匹配层面，而要结合论文的研究问题、方法假设、"
+            "实验对象和后续影响，判断它在领域中的位置。"
+        )
+
+    if papers:
+        year_text = f"，时间跨度约为 {years[0]}-{years[-1]} 年" if years else ""
+        title_text = "；代表性论文包括《" + "》《".join(titles[:3]) + "》" if titles else ""
+        parts.append(
+            f"从当前本地论文库看，系统检索到 {len(papers)} 篇相关论文{year_text}"
+            f"{title_text}。这些论文共同提供了主题定义、方法演化和实验证据，"
+            "适合作为后续精读与问答的基础。"
+        )
+    else:
+        parts.append(
+            "当前本地样本仍然有限，因此这份 Wiki 会优先明确概念边界、方法谱系和待验证问题，"
+            "避免在证据不足时给出过度确定的结论。"
+        )
+
+    if section_titles:
+        parts.append(
+            "后续章节将围绕"
+            + "、".join(f"「{title}」" for title in section_titles)
+            + "展开，重点说明该主题的来龙去脉、核心技术路线、关键论文证据以及值得继续追踪的新方向。"
+        )
+    else:
+        parts.append(
+            "后续章节将按背景、方法、代表性论文、挑战和未来方向组织，帮助用户先建立可复用的领域地图。"
+        )
+
+    return "\n\n".join(parts)
+
+
+def _source_titles_from_text(all_sources_text: str, limit: int = 4) -> list[str]:
+    titles: list[str] = []
+    for line in all_sources_text.splitlines():
+        match = re.match(r"\[(?:P|S)\d+\]\s+(.+?)(?:\s+\(\d{4}|\s+\(\?|$)", line.strip())
+        if match:
+            title = match.group(1).strip()
+            if title and title not in titles:
+                titles.append(title)
+        if len(titles) >= limit:
+            break
+    return titles
+
+
+def _fallback_section_content(
+    *,
+    keyword: str,
+    section_title: str,
+    key_points: list[str] | None = None,
+    source_refs: list[str] | None = None,
+    all_sources_text: str = "",
+) -> str:
+    points = [str(point).strip() for point in (key_points or []) if str(point).strip()]
+    refs = ", ".join(source_refs or [])
+    titles = _source_titles_from_text(all_sources_text)
+
+    parts = [
+        f"本节围绕「{section_title}」梳理「{keyword}」的一个关键侧面。"
+    ]
+    if points:
+        parts.append("当前资料指向的核心问题包括：" + "；".join(points[:4]) + "。")
+    if titles:
+        parts.append(
+            "可优先对照的论文包括《"
+            + "》《".join(titles[:3])
+            + "》。这些论文为本节提供了基本证据，但仍需要进一步精读来确认方法细节和实验边界。"
+        )
+    if refs:
+        parts.append(f"相关来源标记为 {refs}。")
+    parts.append(
+        "在后续阅读中，建议把本节作为问题清单使用：先确认每篇论文解决的具体任务，"
+        "再比较其假设、数据设置、指标和失效场景。"
+    )
+    return "\n\n".join(parts)
+
+
+def _fallback_topic_summary_data(
+    *,
+    keyword: str,
+    sections: list[dict],
+    paper_contexts: list[dict],
+) -> dict:
+    section_titles = [
+        str(sec.get("title") or "").strip()
+        for sec in sections
+        if isinstance(sec, dict) and str(sec.get("title") or "").strip()
+    ]
+    paper_titles = [_paper_title(paper) for paper in paper_contexts if _paper_title(paper)]
+    findings = [
+        f"当前资料显示，「{keyword}」需要从「{title}」角度理解。"
+        for title in section_titles[:3]
+    ]
+    if not findings:
+        findings = [f"当前资料显示，「{keyword}」仍需要结合更多论文继续补充证据。"]
+    directions = [
+        "优先精读最新论文，核对方法假设、实验设置和指标是否与当前研究需求一致。",
+        "继续补充高引用代表作和近两年的新工作，避免主题 Wiki 只覆盖单一阶段。",
+        "把阅读反馈同步回用户画像和论文库标签，用于后续推荐排序。",
+    ]
+    return {
+        "key_findings": findings,
+        "future_directions": directions,
+        "reading_list": paper_titles[:6],
+    }
+
+
+def _topic_wiki_markdown(keyword: str, wiki_content: dict) -> str:
+    md_parts = [f"# {keyword}\n\n{wiki_content.get('overview', '')}"]
+    for sec in wiki_content.get("sections", []) or []:
+        if not isinstance(sec, dict):
+            continue
+        md_parts.append(f"\n## {sec.get('title', '')}\n\n{sec.get('content', '')}")
+    if wiki_content.get("methodology_evolution"):
+        md_parts.append(f"\n## 方法论演化\n\n{wiki_content['methodology_evolution']}")
+    return "\n".join(md_parts)
+
+
+def _sanitize_topic_sections(
+    *,
+    keyword: str,
+    sections: list[dict] | None,
+    all_sources_text: str = "",
+) -> list[dict]:
+    cleaned_sections: list[dict] = []
+    for sec in sections or []:
+        if not isinstance(sec, dict):
+            continue
+        title = str(sec.get("title") or sec.get("section_title") or "").strip()
+        content = _sanitize_wiki_text(
+            str(sec.get("content") or ""),
+            keyword=keyword,
+            min_chars=80,
+        )
+        if not content:
+            content = _fallback_section_content(
+                keyword=keyword,
+                section_title=title or "主题章节",
+                key_points=sec.get("key_points") if isinstance(sec.get("key_points"), list) else [],
+                source_refs=sec.get("source_refs") if isinstance(sec.get("source_refs"), list) else [],
+                all_sources_text=all_sources_text,
+            )
+        cleaned = dict(sec)
+        cleaned["title"] = title or "主题章节"
+        cleaned["content"] = content
+        cleaned_sections.append(cleaned)
+    return cleaned_sections
+
+
+def repair_topic_wiki_payload(payload: dict | None, keyword: str | None = None) -> dict:
+    """Repair persisted topic Wiki metadata before rendering old history records."""
+    repaired = dict(payload or {})
+    wiki_content = repaired.get("wiki_content")
+    if not isinstance(wiki_content, dict):
+        return repaired
+
+    topic = keyword or str(repaired.get("keyword") or "").strip() or "主题"
+    content = dict(wiki_content)
+    sections = _sanitize_topic_sections(
+        keyword=topic,
+        sections=content.get("sections") if isinstance(content.get("sections"), list) else [],
+    )
+    overview = _sanitize_wiki_text(
+        str(content.get("overview") or ""),
+        keyword=topic,
+        min_chars=80,
+    )
+    if not overview:
+        overview = _fallback_topic_overview(
+            keyword=topic,
+            paper_contexts=[],
+            sections=sections,
+            survey_data=repaired.get("survey") if isinstance(repaired.get("survey"), dict) else {},
+            timeline=repaired.get("timeline") if isinstance(repaired.get("timeline"), dict) else {},
+        )
+
+    content["overview"] = overview
+    content["sections"] = sections
+    fallback_summary = _fallback_topic_summary_data(
+        keyword=topic,
+        sections=sections,
+        paper_contexts=[],
+    )
+    if not content.get("key_findings"):
+        content["key_findings"] = fallback_summary["key_findings"]
+    if not content.get("future_directions"):
+        content["future_directions"] = fallback_summary["future_directions"]
+    if not content.get("reading_list"):
+        content["reading_list"] = fallback_summary["reading_list"]
+    repaired["wiki_content"] = content
+    repaired["markdown"] = _topic_wiki_markdown(topic, content)
+    return repaired
 
 
 class GraphService:
@@ -387,7 +751,7 @@ class GraphService:
                 key=lambda x: x[1],
                 reverse=True,
             )
-            for (a, b), strength in sorted_pairs:
+            for (a, b), _strength in sorted_pairs:
                 found = None
                 for cl in clusters:
                     if a in cl or b in cl:
@@ -884,7 +1248,6 @@ class GraphService:
                 in_degree[e.target_paper_id] += 1
 
             all_node_ids = set(topic_ids_set)
-            topic_paper_map = {p.id: p for p in topic_papers}
 
             nodes = []
             for p in topic_papers:
@@ -1336,11 +1699,18 @@ class GraphService:
             pdf_excerpts,
         )
         sec_plans = outline.get("outline", [])[:5]
+        if outline_result.is_pseudo or not sec_plans:
+            sec_plans = _fallback_section_plans(keyword, paper_contexts)
         _progress(0.35, f"并行生成 {len(sec_plans)} 个章节...")
         sections = self._generate_sections_parallel(
             keyword,
             sec_plans,
             all_sources_text,
+        )
+        sections = _sanitize_topic_sections(
+            keyword=keyword,
+            sections=sections,
+            all_sources_text=all_sources_text,
         )
 
         _progress(0.75, "生成概述和总结...")
@@ -1348,13 +1718,25 @@ class GraphService:
         # 5a: 文本概述
         section_titles = ", ".join(s.get("title", "") for s in sections)
         survey_overview = survey_data.get("summary", {}).get("overview", "")[:600]
+        overview_sources = []
+        for idx, paper in enumerate(paper_contexts[:8], 1):
+            title = paper.get("title") or "N/A"
+            year = paper.get("year") or "?"
+            abstract = (paper.get("abstract") or "")[:280]
+            analysis = (paper.get("analysis") or "")[:220]
+            overview_sources.append(
+                f"[P{idx}] {title} ({year})\n摘要: {abstract}\n已有解析: {analysis}"
+            )
         overview_prompt = (
             "你是世界顶级学术综述作者。"
             f"请为「{keyword}」主题撰写一段 300-500 字的概述，"
             "涵盖该主题的定义、重要性、核心思想和发展脉络。\n"
+            "必须基于给定论文资料写，不要输出系统提示、provider、model 或 summary 字段。\n"
+            "不要泛泛而谈，要点名关键问题、方法谱系和可验证的论文证据。\n"
             "直接输出文本，不要用 JSON 或代码块包裹。\n\n"
             f"已有章节: {section_titles}\n"
             f"参考综述: {survey_overview}\n"
+            f"论文资料:\n{chr(10).join(overview_sources)}\n"
         )
         overview_result = self.llm.summarize_text(
             overview_prompt,
@@ -1367,9 +1749,20 @@ class GraphService:
             stage="wiki_overview",
             prompt_digest=f"overview:{keyword}",
         )
-        overview_text = (overview_result.content or "").strip()
-        overview_text = re.sub(r"^```(?:markdown)?\s*\n?", "", overview_text)
-        overview_text = re.sub(r"\n?```\s*$", "", overview_text)
+        overview_text = _sanitize_wiki_text(
+            overview_result.content,
+            keyword=keyword,
+            min_chars=120,
+            is_pseudo=overview_result.is_pseudo,
+        )
+        if not overview_text:
+            overview_text = _fallback_topic_overview(
+                keyword=keyword,
+                paper_contexts=paper_contexts,
+                sections=sections,
+                survey_data=survey_data,
+                timeline=tl,
+            )
 
         # 5b: 结构化汇总（key_findings + future_directions）
         summary_prompt = (
@@ -1394,6 +1787,12 @@ class GraphService:
             prompt_digest=f"summary:{keyword}",
         )
         summary_data = summary_result.parsed_json or {}
+        if summary_result.is_pseudo or not summary_data:
+            summary_data = _fallback_topic_summary_data(
+                keyword=keyword,
+                sections=sections,
+                paper_contexts=paper_contexts,
+            )
 
         # 组装最终 wiki_content
         wiki_content: dict = {
@@ -1409,12 +1808,7 @@ class GraphService:
         }
 
         # 备用 markdown
-        md_parts = [f"# {keyword}\n\n{wiki_content.get('overview', '')}"]
-        for sec in sections:
-            md_parts.append(f"\n## {sec.get('title', '')}\n\n{sec.get('content', '')}")
-        if wiki_content.get("methodology_evolution"):
-            md_parts.append(f"\n## 方法论演化\n\n{wiki_content['methodology_evolution']}")
-        markdown = "\n".join(md_parts)
+        markdown = _topic_wiki_markdown(keyword, wiki_content)
 
         _progress(1.0, "Wiki 生成完成")
         return {
@@ -1479,9 +1873,20 @@ class GraphService:
             stage="wiki_section",
             prompt_digest=f"section:{sec_title[:60]}",
         )
-        content = sec_result.content or ""
-        content = re.sub(r"^```(?:markdown)?\s*\n?", "", content.strip())
-        content = re.sub(r"\n?```\s*$", "", content.strip())
+        content = _sanitize_wiki_text(
+            sec_result.content,
+            keyword=keyword,
+            min_chars=80,
+            is_pseudo=sec_result.is_pseudo,
+        )
+        if not content:
+            content = _fallback_section_content(
+                keyword=keyword,
+                section_title=sec_title or "主题章节",
+                key_points=sec_plan.get("key_points", []),
+                source_refs=sec_plan.get("source_refs", []),
+                all_sources_text=all_sources_text,
+            )
         return {
             "title": sec_title,
             "content": content,

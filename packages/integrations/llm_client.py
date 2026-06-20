@@ -92,6 +92,7 @@ class LLMResult:
     output_cost_usd: float | None = None
     total_cost_usd: float | None = None
     reasoning_content: str | None = None
+    is_pseudo: bool = False
 
 
 @dataclass
@@ -365,6 +366,7 @@ class LLMClient:
             output_cost_usd=result.output_cost_usd,
             total_cost_usd=result.total_cost_usd,
             reasoning_content=result.reasoning_content,
+            is_pseudo=result.is_pseudo,
         )
 
     def vision_analyze(
@@ -799,6 +801,7 @@ class LLMClient:
             input_cost_usd=in_cost,
             output_cost_usd=out_cost,
             total_cost_usd=in_cost + out_cost,
+            is_pseudo=True,
         )
 
     @staticmethod

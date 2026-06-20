@@ -5,6 +5,7 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from apps.api.deps import cache, graph_service, iso_dt
+from packages.ai.graph_service import repair_topic_wiki_payload
 from packages.domain.task_tracker import global_tracker
 from packages.storage.db import session_scope
 from packages.storage.repositories import GeneratedContentRepository
@@ -172,16 +173,21 @@ def generated_detail(content_id: str) -> dict:
         repo = GeneratedContentRepository(session)
         try:
             gc = repo.get_by_id(content_id)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Content not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Content not found") from exc
+        metadata_json = gc.metadata_json
+        markdown = gc.markdown
+        if gc.content_type == "topic_wiki":
+            metadata_json = repair_topic_wiki_payload(metadata_json, gc.keyword)
+            markdown = metadata_json.get("markdown") or markdown
         return {
             "id": gc.id,
             "content_type": gc.content_type,
             "title": gc.title,
             "keyword": gc.keyword,
             "paper_id": gc.paper_id,
-            "markdown": gc.markdown,
-            "metadata_json": gc.metadata_json,
+            "markdown": markdown,
+            "metadata_json": metadata_json,
             "created_at": iso_dt(gc.created_at),
         }
 
@@ -192,8 +198,8 @@ def generated_delete(content_id: str) -> dict:
         repo = GeneratedContentRepository(session)
         try:
             repo.get_by_id(content_id)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Content not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Content not found") from exc
         repo.delete(content_id)
     return {"deleted": content_id}
 
