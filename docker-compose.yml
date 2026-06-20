@@ -1,0 +1,122 @@
+# ScholarMind Docker Compose - 分离部署配置
+# @author ScholarMind Team
+#
+# 端口规划：
+# - 前端：3002
+# - 后端：8002
+#
+# 使用方法:
+#   1. cp .env.example .env && 编辑 .env 填入 API Key
+#   2. docker compose up -d --build
+#   3. 访问 http://localhost:3002
+
+services:
+  # ==========================================
+  # 后端服务 (FastAPI)
+  # ==========================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: scholarmind-backend
+    ports:
+      - "8002:8000"  # 映射到 8002（避免 8001 冲突）
+    volumes:
+      - pm_data:/app/data
+      - pm_logs:/app/logs
+      - pm_pip_cache:/.pip-cache
+    env_file:
+      - ./.env
+    environment:
+      - APP_ENV=production
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - SITE_URL=https://pm.vibingu.cn
+      - CORS_ALLOW_ORIGINS=http://localhost:3002,http://127.0.0.1:3002,https://pm.vibingu.cn,http://pm.vibingu.cn
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ==========================================
+  # Worker 服务 (定时任务 + 闲时处理)
+  # ==========================================
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: scholarmind-worker
+    command: python -m apps.worker.main
+    volumes:
+      - pm_data:/app/data
+      - pm_logs:/app/logs
+      - pm_pip_cache:/.pip-cache
+    env_file:
+      - ./.env
+    environment:
+      - APP_ENV=production
+      - SITE_URL=https://pm.vibingu.cn
+    restart: unless-stopped
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/worker_heartbeat"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ==========================================
+  # 前端服务 (Nginx 托管静态文件)
+  # ==========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: scholarmind-frontend
+    ports:
+      - "3002:80"  # 映射到 3002（避免 3001 冲突）
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+# ==========================================
+# 数据卷定义（持久化存储）
+# ==========================================
+volumes:
+  pm_data:
+    name: scholarmind_data
+  pm_logs:
+    name: scholarmind_logs
+  pm_pip_cache:

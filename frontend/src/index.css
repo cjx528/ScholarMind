@@ -1,0 +1,522 @@
+/**
+ * ScholarMind - Claude-inspired Design System
+ * @author ScholarMind Team
+ */
+@import "tailwindcss";
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+
+  --color-primary: #C4663C;
+  --color-primary-hover: #A8522D;
+  --color-primary-light: #F7EDE8;
+  --color-primary-50: #FDF5F1;
+
+  --color-page: #FAF9F6;
+  --color-surface: #FFFFFF;
+  --color-sidebar: #FDFCFA;
+  --color-border: #E8E2D9;
+  --color-border-light: #F0EBE4;
+
+  --color-ink: #1A1612;
+  --color-ink-secondary: #7C7369;
+  --color-ink-tertiary: #B5AEA5;
+  --color-ink-placeholder: #C8C2BA;
+
+  --color-hover: #F5F0EA;
+  --color-active: #EDE6DD;
+
+  --color-success: #059669;
+  --color-success-light: #ECFDF5;
+  --color-warning: #D97706;
+  --color-warning-light: #FFFBEB;
+  --color-error: #DC2626;
+  --color-error-light: #FEF2F2;
+  --color-info: #2563EB;
+  --color-info-light: #EFF6FF;
+}
+
+/* 暗色模式变量覆盖 */
+html.dark {
+  --color-primary: #D4825E;
+  --color-primary-hover: #C4663C;
+  --color-primary-light: #2A2018;
+  --color-primary-50: #1E1814;
+
+  --color-page: #141210;
+  --color-surface: #1C1A17;
+  --color-sidebar: #181614;
+  --color-border: #2E2A25;
+  --color-border-light: #252220;
+
+  --color-ink: #E8E2D9;
+  --color-ink-secondary: #9E958A;
+  --color-ink-tertiary: #6B6359;
+  --color-ink-placeholder: #554E46;
+
+  --color-hover: #222018;
+  --color-active: #2A2720;
+
+  --color-success: #34D399;
+  --color-success-light: #0A2A1F;
+  --color-warning: #F59E0B;
+  --color-warning-light: #2A1E08;
+  --color-error: #F87171;
+  --color-error-light: #2A1414;
+  --color-info: #60A5FA;
+  --color-info-light: #0E1E3A;
+}
+
+/* 全局基础样式 */
+html {
+  background-color: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-tertiary);
+}
+
+/* 动画 */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+.animate-slide-in {
+  animation: slide-in 0.2s ease-out;
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 1.5s ease-in-out infinite;
+}
+
+/* Markdown 内容样式 */
+.markdown-body h1 { font-size: 1.5rem; font-weight: 700; margin: 1.5rem 0 0.75rem; color: var(--color-ink); }
+.markdown-body h2 { font-size: 1.25rem; font-weight: 600; margin: 1.25rem 0 0.5rem; color: var(--color-ink); }
+.markdown-body h3 { font-size: 1.1rem; font-weight: 600; margin: 1rem 0 0.5rem; color: var(--color-ink); }
+.markdown-body p { margin: 0.5rem 0; line-height: 1.7; color: var(--color-ink-secondary); }
+.markdown-body ul, .markdown-body ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+.markdown-body li { margin: 0.25rem 0; line-height: 1.6; color: var(--color-ink-secondary); }
+.markdown-body code {
+  background: var(--color-hover);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: var(--color-primary);
+}
+.markdown-body pre {
+  background: var(--color-ink);
+  color: #E8E2D9;
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.markdown-body pre code {
+  background: none;
+  color: inherit;
+  padding: 0;
+}
+.markdown-body blockquote {
+  border-left: 3px solid var(--color-primary);
+  padding-left: 1rem;
+  margin: 0.75rem 0;
+  color: var(--color-ink-secondary);
+}
+.markdown-body strong { color: var(--color-ink); font-weight: 600; }
+.markdown-body a { color: var(--color-primary); text-decoration: underline; }
+.markdown-body hr { border: none; border-top: 1px solid var(--color-border); margin: 1.5rem 0; }
+
+/* react-markdown 排版样式 */
+.prose-custom {
+  color: var(--color-ink);
+  font-size: 0.9375rem;
+  line-height: 1.75;
+}
+.prose-custom h1 { font-size: 1.5rem; font-weight: 700; margin: 1.5rem 0 0.75rem; color: var(--color-ink); }
+.prose-custom h2 { font-size: 1.25rem; font-weight: 600; margin: 1.25rem 0 0.625rem; color: var(--color-ink); }
+.prose-custom h3 { font-size: 1.1rem; font-weight: 600; margin: 1rem 0 0.5rem; color: var(--color-ink); }
+.prose-custom p { margin: 0.625rem 0; }
+.prose-custom ul, .prose-custom ol { padding-left: 1.5rem; margin: 0.625rem 0; }
+.prose-custom li { margin: 0.25rem 0; }
+.prose-custom ul li { list-style-type: disc; }
+.prose-custom ol li { list-style-type: decimal; }
+.prose-custom code {
+  background: var(--color-primary-light, rgba(113, 92, 254, 0.08));
+  color: var(--color-primary);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+}
+.prose-custom pre {
+  background: var(--color-page);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.prose-custom pre code { background: none; color: inherit; padding: 0; }
+.prose-custom blockquote {
+  border-left: 3px solid var(--color-primary);
+  padding-left: 1rem;
+  margin: 0.75rem 0;
+  color: var(--color-ink-secondary);
+  font-style: italic;
+}
+.prose-custom strong { color: var(--color-ink); font-weight: 600; }
+.prose-custom em { font-style: italic; }
+.prose-custom a { color: var(--color-primary); text-decoration: underline; }
+.prose-custom hr { border: none; border-top: 1px solid var(--color-border); margin: 1.5rem 0; }
+.prose-custom table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; }
+.prose-custom th, .prose-custom td { border: 1px solid var(--color-border); padding: 0.5rem 0.75rem; text-align: left; }
+.prose-custom th { background: var(--color-page); font-weight: 600; }
+
+/* 暗色模式下 form 控件 */
+html.dark select,
+html.dark input,
+html.dark textarea {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  border-color: var(--color-border);
+}
+html.dark select option {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+}
+
+/* 确认卡片脉冲动画 */
+@keyframes confirm-glow {
+  0%, 100% { box-shadow: 0 4px 12px rgba(234, 179, 8, 0.1); }
+  50% { box-shadow: 0 4px 20px rgba(234, 179, 8, 0.25); }
+}
+
+/* 统计卡片渐变背景 */
+.stat-gradient-primary {
+  background: linear-gradient(135deg, rgba(196, 102, 60, 0.08), rgba(196, 102, 60, 0.02));
+}
+.stat-gradient-info {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(37, 99, 235, 0.02));
+}
+.stat-gradient-success {
+  background: linear-gradient(135deg, rgba(5, 150, 105, 0.08), rgba(5, 150, 105, 0.02));
+}
+.stat-gradient-warning {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.08), rgba(217, 119, 6, 0.02));
+}
+html.dark .stat-gradient-primary {
+  background: linear-gradient(135deg, rgba(212, 130, 94, 0.12), rgba(212, 130, 94, 0.03));
+}
+html.dark .stat-gradient-info {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.12), rgba(96, 165, 250, 0.03));
+}
+html.dark .stat-gradient-success {
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.12), rgba(52, 211, 153, 0.03));
+}
+html.dark .stat-gradient-warning {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.03));
+}
+
+/* 页面标题渐变 */
+.page-hero {
+  background: linear-gradient(135deg, var(--color-surface) 0%, var(--color-page) 100%);
+  border: 1px solid var(--color-border-light);
+}
+
+/* 细腻悬浮效果 */
+.hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.08);
+}
+html.dark .hover-lift:hover {
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.3);
+}
+
+/* 进度条动画 */
+@keyframes bar-fill {
+  from { width: 0; }
+}
+.bar-animate {
+  animation: bar-fill 0.6s ease-out;
+}
+
+/* 时间线节点 */
+.timeline-dot {
+  position: relative;
+}
+.timeline-dot::before {
+  content: '';
+  position: absolute;
+  left: -17px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+}
+.timeline-dot::after {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  width: 2px;
+  height: calc(100% + 8px);
+  background: var(--color-border-light);
+}
+
+/* 活跃状态指示器 */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.status-running {
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+
+/* 表单控件通用样式 */
+.form-input {
+  display: block;
+  width: 100%;
+  height: 2.5rem;
+  padding: 0 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.form-input::placeholder { color: var(--color-ink-placeholder); }
+.form-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(196, 102, 60, 0.12);
+}
+.form-input:disabled { opacity: 0.5; }
+html.dark .form-input:focus {
+  box-shadow: 0 0 0 3px rgba(212, 130, 94, 0.15);
+}
+
+/* ========== PDF Reader ========== */
+.pdf-page-shadow {
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pdf-page-shadow canvas {
+  display: block;
+}
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  color: rgba(255,255,255,0.6);
+  transition: background-color 0.15s, color 0.15s;
+}
+.toolbar-btn:hover:not(:disabled) {
+  background-color: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.9);
+}
+.toolbar-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.toolbar-btn-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.5rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(255,255,255,0.6);
+  transition: background-color 0.15s, color 0.15s;
+}
+.toolbar-btn-text:hover {
+  background-color: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.9);
+}
+.ai-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  transition: background-color 0.15s;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in {
+  animation: slideIn 0.25s ease-out;
+}
+@keyframes shimmer {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+.animate-shimmer {
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* PDF AI 助手 Markdown 渲染 - 深色主题 */
+.pdf-ai-markdown {
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: rgba(255,255,255,0.82);
+}
+.pdf-ai-markdown p {
+  margin-bottom: 0.6em;
+}
+.pdf-ai-markdown p:last-child {
+  margin-bottom: 0;
+}
+.pdf-ai-markdown strong {
+  color: rgba(255,255,255,0.95);
+  font-weight: 600;
+}
+.pdf-ai-markdown em {
+  color: rgba(255,255,255,0.7);
+  font-style: italic;
+}
+.pdf-ai-markdown h1, .pdf-ai-markdown h2, .pdf-ai-markdown h3,
+.pdf-ai-markdown h4, .pdf-ai-markdown h5, .pdf-ai-markdown h6 {
+  color: rgba(255,255,255,0.92);
+  font-weight: 600;
+  margin: 0.8em 0 0.4em;
+  line-height: 1.4;
+}
+.pdf-ai-markdown h1 { font-size: 1rem; }
+.pdf-ai-markdown h2 { font-size: 0.9375rem; }
+.pdf-ai-markdown h3 { font-size: 0.875rem; }
+.pdf-ai-markdown ul, .pdf-ai-markdown ol {
+  padding-left: 1.4em;
+  margin-bottom: 0.6em;
+}
+.pdf-ai-markdown li {
+  margin-bottom: 0.25em;
+}
+.pdf-ai-markdown li::marker {
+  color: rgba(255,255,255,0.3);
+}
+.pdf-ai-markdown code {
+  background: rgba(255,255,255,0.08);
+  color: #f0a67a;
+  padding: 0.15em 0.4em;
+  border-radius: 0.3em;
+  font-size: 0.85em;
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}
+.pdf-ai-markdown pre {
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin: 0.6em 0;
+  overflow-x: auto;
+}
+.pdf-ai-markdown pre code {
+  background: none;
+  color: rgba(255,255,255,0.8);
+  padding: 0;
+  font-size: 0.8em;
+}
+.pdf-ai-markdown blockquote {
+  border-left: 3px solid rgba(196,102,60,0.5);
+  padding-left: 0.8em;
+  margin: 0.6em 0;
+  color: rgba(255,255,255,0.6);
+  font-style: italic;
+}
+.pdf-ai-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.8em;
+}
+.pdf-ai-markdown th {
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.8);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.4em 0.6em;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.pdf-ai-markdown td {
+  padding: 0.35em 0.6em;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.7);
+}
+.pdf-ai-markdown hr {
+  border: none;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  margin: 0.8em 0;
+}
+.pdf-ai-markdown a {
+  color: #f0a67a;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.pdf-ai-markdown a:hover {
+  color: #f5c4a1;
+}
+/* KaTeX 公式在深色背景下的颜色适配 */
+.pdf-ai-markdown .katex {
+  color: rgba(255,255,255,0.9);
+}

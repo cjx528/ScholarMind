@@ -1,0 +1,738 @@
+"""
+数据库引擎和会话管理
+@author ScholarMind Team
+"""
+
+from __future__ import annotations
+
+import logging
+import json
+import uuid as _uuid
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import StaticPool, create_engine, event, text
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+from packages.config import get_settings
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+logger = logging.getLogger(__name__)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+settings = get_settings()
+_is_sqlite = settings.database_url.startswith("sqlite")
+connect_args: dict = {}
+if _is_sqlite:
+    # 增加 timeout 到 60s，避免并发写入时立即报 database is locked
+    connect_args = {"check_same_thread": False, "timeout": 60}
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    connect_args=connect_args,
+    # SQLite 特定配置
+    poolclass=StaticPool if _is_sqlite else None,
+)
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+if _is_sqlite:
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, _connection_record):  # type: ignore[no-redef]
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA cache_size=-64000")  # 64MB 缓存
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.close()
+
+
+@contextmanager
+def session_scope() -> Generator[Session, None, None]:
+    """提供事务范围的数据库会话"""
+    session = SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def check_db_connection() -> bool:
+    """检查数据库连接是否正常"""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        logger.exception("Database connection check failed")
+        return False
+
+
+def _safe_add_column(
+    conn,
+    table: str,
+    column: str,
+    col_type: str,
+    default: str,
+) -> None:
+    """安全添加列（已存在则跳过）"""
+    try:
+        conn.execute(
+            text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type} NOT NULL DEFAULT {default}")
+        )
+        conn.commit()
+        logger.info("Added column %s.%s", table, column)
+    except Exception:
+        conn.rollback()
+
+
+def _safe_add_nullable_column(conn, table: str, column: str, col_type: str) -> None:
+    if not _table_exists(conn, table) or column in _column_names(conn, table):
+        return
+    try:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+        conn.commit()
+        logger.info("Added nullable column %s.%s", table, column)
+    except Exception as exc:
+        conn.rollback()
+        logger.debug("Skipped adding nullable column %s.%s: %s", table, column, exc)
+
+
+def _table_exists(conn, table: str) -> bool:
+    row = conn.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table' AND name=:table"),
+        {"table": table},
+    ).fetchone()
+    return row is not None
+
+
+def _column_names(conn, table: str) -> set[str]:
+    if not _table_exists(conn, table):
+        return set()
+    return {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+
+
+def _read_all_rows(conn, table: str) -> list[dict]:
+    if not _table_exists(conn, table):
+        return []
+    return [dict(row._mapping) for row in conn.execute(text(f"SELECT * FROM {table}"))]
+
+
+def _now_sql() -> str:
+    return datetime.now(UTC).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
+
+
+def _bool_int(value, default: bool = False) -> int:
+    if value is None:
+        return int(default)
+    if isinstance(value, str):
+        return int(value.strip().lower() in {"1", "true", "yes", "on", "active"})
+    return int(bool(value))
+
+
+def _json_text(value, fallback: str) -> str:
+    if value in (None, ""):
+        return fallback
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _rebuild_table(conn, table: str, create_sql: str, insert_sql: str, rows: list[dict]) -> None:
+    """Replace an old incompatible SQLite table while preserving mapped data."""
+    new_table = f"{table}__new"
+    try:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(text(f"DROP TABLE IF EXISTS {new_table}"))
+        conn.execute(text(create_sql.replace("{table}", new_table)))
+        if rows:
+            conn.execute(text(insert_sql.replace("{table}", new_table)), rows)
+        conn.execute(text(f"DROP TABLE {table}"))
+        conn.execute(text(f"ALTER TABLE {new_table} RENAME TO {table}"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        conn.commit()
+        logger.info("Rebuilt legacy table %s", table)
+    except Exception:
+        conn.rollback()
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        logger.exception("Failed to rebuild legacy table %s", table)
+
+
+def _migrate_legacy_email_configs(conn) -> None:
+    table = "email_configs"
+    cols = _column_names(conn, table)
+    legacy_cols = {"smtp_host", "smtp_username", "smtp_password", "from_address", "enabled"}
+    if not cols or not (legacy_cols & cols):
+        return
+    rows = []
+    for row in _read_all_rows(conn, table):
+        rows.append(
+            {
+                "id": row.get("id") or str(_uuid.uuid4()),
+                "name": row.get("name") or "Default",
+                "smtp_server": row.get("smtp_server") or row.get("smtp_host") or "",
+                "smtp_port": row.get("smtp_port") or 587,
+                "smtp_use_tls": _bool_int(row.get("smtp_use_tls"), True),
+                "sender_email": row.get("sender_email") or row.get("from_address") or "",
+                "sender_name": row.get("sender_name") or "ScholarMind",
+                "username": row.get("username") or row.get("smtp_username") or "",
+                "password": row.get("password") or row.get("smtp_password") or "",
+                "is_active": _bool_int(row.get("is_active", row.get("enabled")), False),
+                "created_at": row.get("created_at") or _now_sql(),
+                "updated_at": row.get("updated_at") or _now_sql(),
+            }
+        )
+    _rebuild_table(
+        conn,
+        table,
+        """
+        CREATE TABLE {table} (
+            id VARCHAR(36) PRIMARY KEY NOT NULL,
+            name VARCHAR(128) NOT NULL UNIQUE,
+            smtp_server VARCHAR(256) NOT NULL,
+            smtp_port INTEGER NOT NULL DEFAULT 587,
+            smtp_use_tls BOOLEAN NOT NULL DEFAULT 1,
+            sender_email VARCHAR(256) NOT NULL,
+            sender_name VARCHAR(128) NOT NULL DEFAULT 'ScholarMind',
+            username VARCHAR(256) NOT NULL,
+            password VARCHAR(512) NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        INSERT OR IGNORE INTO {table} (
+            id, name, smtp_server, smtp_port, smtp_use_tls, sender_email, sender_name,
+            username, password, is_active, created_at, updated_at
+        ) VALUES (
+            :id, :name, :smtp_server, :smtp_port, :smtp_use_tls, :sender_email, :sender_name,
+            :username, :password, :is_active, :created_at, :updated_at
+        )
+        """,
+        rows,
+    )
+
+
+def _migrate_legacy_cs_categories(conn) -> None:
+    table = "cs_categories"
+    cols = _column_names(conn, table)
+    if not cols or ({"code", "name", "cached_at"} <= cols and "category_code" not in cols):
+        return
+    rows = []
+    seen: set[str] = set()
+    for row in _read_all_rows(conn, table):
+        code = row.get("code") or row.get("category_code") or row.get("id")
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        rows.append(
+            {
+                "code": code,
+                "name": row.get("name") or row.get("category_name") or code,
+                "description": row.get("description") or "",
+                "cached_at": row.get("cached_at") or row.get("created_at") or _now_sql(),
+            }
+        )
+    _rebuild_table(
+        conn,
+        table,
+        """
+        CREATE TABLE {table} (
+            code VARCHAR(32) PRIMARY KEY NOT NULL,
+            name VARCHAR(128) NOT NULL,
+            description VARCHAR(512),
+            cached_at DATETIME
+        )
+        """,
+        """
+        INSERT OR IGNORE INTO {table} (code, name, description, cached_at)
+        VALUES (:code, :name, :description, :cached_at)
+        """,
+        rows,
+    )
+
+
+def _migrate_legacy_agent_pending_actions(conn) -> None:
+    table = "agent_pending_actions"
+    cols = _column_names(conn, table)
+    if not cols or ({"tool_name", "tool_args", "conversation_state"} <= cols and "action_type" not in cols):
+        return
+    rows = []
+    for row in _read_all_rows(conn, table):
+        rows.append(
+            {
+                "id": row.get("id") or str(_uuid.uuid4()),
+                "conversation_id": row.get("conversation_id"),
+                "tool_name": row.get("tool_name") or row.get("action_type") or "legacy_action",
+                "tool_args": _json_text(row.get("tool_args") or row.get("action_data"), "{}"),
+                "tool_call_id": row.get("tool_call_id"),
+                "conversation_state": _json_text(row.get("conversation_state"), "{}"),
+                "created_at": row.get("created_at") or _now_sql(),
+            }
+        )
+    _rebuild_table(
+        conn,
+        table,
+        """
+        CREATE TABLE {table} (
+            id VARCHAR(36) PRIMARY KEY NOT NULL,
+            conversation_id VARCHAR(36),
+            tool_name VARCHAR(128) NOT NULL,
+            tool_args JSON NOT NULL DEFAULT '{}',
+            tool_call_id VARCHAR(64),
+            conversation_state JSON,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        INSERT OR IGNORE INTO {table} (
+            id, conversation_id, tool_name, tool_args, tool_call_id, conversation_state, created_at
+        ) VALUES (
+            :id, :conversation_id, :tool_name, :tool_args, :tool_call_id, :conversation_state, :created_at
+        )
+        """,
+        rows,
+    )
+    _safe_create_index(conn, "ix_agent_pending_actions_conversation_id", table, "conversation_id")
+    _safe_create_index(conn, "ix_agent_pending_actions_created_at", table, "created_at")
+
+
+
+def _safe_create_index(conn, idx_name: str, table: str, column: str) -> None:
+    """安全创建索引（已存在则跳过）"""
+    try:
+        conn.execute(text(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table} ({column})"))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+
+def run_migrations() -> None:
+    """启动时执行轻量级数据库迁移"""
+    import packages.storage.models  # noqa: F401
+
+    Base.metadata.create_all(bind=engine)
+
+    with engine.connect() as conn:
+        topic_cols_before = _column_names(conn, "topic_subscriptions")
+        llm_cols_before = _column_names(conn, "llm_provider_configs")
+        daily_cols_before = _column_names(conn, "daily_report_configs")
+
+        _migrate_legacy_email_configs(conn)
+        _migrate_legacy_cs_categories(conn)
+        _migrate_legacy_agent_pending_actions(conn)
+
+        _safe_add_column(conn, "topic_subscriptions", "max_results_per_run", "INTEGER", "20")
+        _safe_add_column(conn, "topic_subscriptions", "retry_limit", "INTEGER", "2")
+        _safe_add_column(conn, "topic_subscriptions", "sources", "JSON", """'["arxiv"]'""")
+        _safe_add_column(conn, "topic_subscriptions", "paused", "BOOLEAN", "0")
+        _safe_add_column(conn, "topic_subscriptions", "intent_profile_json", "JSON", "'{}'")
+        _safe_add_column(conn, "topic_subscriptions", "last_radar_json", "JSON", "'{}'")
+        _safe_add_nullable_column(conn, "topic_subscriptions", "last_radar_at", "DATETIME")
+        if "daily_limit" in topic_cols_before and "max_results_per_run" not in topic_cols_before:
+            try:
+                conn.execute(
+                    text(
+                        "UPDATE topic_subscriptions "
+                        "SET max_results_per_run = CASE "
+                        "WHEN daily_limit > 0 THEN daily_limit ELSE max_results_per_run END"
+                    )
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
+        _safe_add_nullable_column(conn, "llm_provider_configs", "api_base_url", "VARCHAR(512)")
+        _safe_add_column(conn, "llm_provider_configs", "is_active", "BOOLEAN", "0")
+        _safe_add_column(conn, "llm_provider_configs", "model_fallback", "VARCHAR(128)", "''")
+        try:
+            if "base_url" in llm_cols_before and "api_base_url" not in llm_cols_before:
+                conn.execute(
+                    text(
+                        "UPDATE llm_provider_configs "
+                        "SET api_base_url = base_url WHERE api_base_url IS NULL"
+                    )
+                )
+            if "enabled" in llm_cols_before and "is_active" not in llm_cols_before:
+                conn.execute(text("UPDATE llm_provider_configs SET is_active = enabled"))
+            if "model_fallback" not in llm_cols_before:
+                conn.execute(
+                    text(
+                        "UPDATE llm_provider_configs SET model_fallback = "
+                        "COALESCE(NULLIF(model_deep, ''), NULLIF(model_skim, ''), 'fallback')"
+                    )
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        _safe_add_column(conn, "daily_report_configs", "auto_deep_read", "BOOLEAN", "1")
+        _safe_add_column(conn, "daily_report_configs", "deep_read_limit", "INTEGER", "10")
+        _safe_add_column(conn, "daily_report_configs", "send_email_report", "BOOLEAN", "1")
+        _safe_add_column(conn, "daily_report_configs", "recipient_emails", "VARCHAR(2048)", "''")
+        _safe_add_column(conn, "daily_report_configs", "report_time_utc", "INTEGER", "21")
+        _safe_add_column(conn, "daily_report_configs", "include_paper_details", "BOOLEAN", "1")
+        _safe_add_column(conn, "daily_report_configs", "include_graph_insights", "BOOLEAN", "0")
+        try:
+            if "send_time_utc" in daily_cols_before and "report_time_utc" not in daily_cols_before:
+                conn.execute(
+                    text(
+                        "UPDATE daily_report_configs "
+                        "SET report_time_utc = COALESCE(send_time_utc, report_time_utc)"
+                    )
+                )
+            if "include_deep_read" in daily_cols_before and "auto_deep_read" not in daily_cols_before:
+                conn.execute(
+                    text(
+                        "UPDATE daily_report_configs "
+                        "SET auto_deep_read = COALESCE(include_deep_read, auto_deep_read)"
+                    )
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        _safe_add_nullable_column(conn, "prompt_traces", "input_cost_usd", "FLOAT")
+        _safe_add_nullable_column(conn, "prompt_traces", "output_cost_usd", "FLOAT")
+        _safe_add_nullable_column(conn, "prompt_traces", "total_cost_usd", "FLOAT")
+        _safe_add_nullable_column(conn, "agent_pending_actions", "paper_id", "VARCHAR(36)")
+        _safe_add_column(conn, "agent_pending_actions", "markdown", "TEXT", "''")
+        _safe_add_column(conn, "agent_pending_actions", "metadata_json", "JSON", "'{}'")
+        _safe_create_index(
+            conn, "ix_agent_pending_actions_paper_id", "agent_pending_actions", "paper_id"
+        )
+        _safe_add_column(
+            conn,
+            "topic_subscriptions",
+            "schedule_frequency",
+            "VARCHAR(20)",
+            "'daily'",
+        )
+        _safe_add_column(
+            conn,
+            "topic_subscriptions",
+            "schedule_time_utc",
+            "INTEGER",
+            "21",
+        )
+        _safe_add_column(
+            conn,
+            "topic_subscriptions",
+            "enable_date_filter",
+            "BOOLEAN",
+            "0",
+        )
+        _safe_add_column(
+            conn,
+            "topic_subscriptions",
+            "date_filter_days",
+            "INTEGER",
+            "7",
+        )
+        _safe_add_column(conn, "papers", "favorited", "BOOLEAN", "0")
+        # 关键列索引加速 ORDER BY / WHERE 查询
+        _safe_create_index(conn, "ix_papers_created_at", "papers", "created_at")
+        _safe_create_index(conn, "ix_prompt_traces_created_at", "prompt_traces", "created_at")
+        _safe_create_index(conn, "ix_pipeline_runs_created_at", "pipeline_runs", "created_at")
+        _safe_create_index(conn, "ix_papers_read_status", "papers", "read_status")
+        _safe_create_index(conn, "ix_papers_favorited", "papers", "favorited")
+        _safe_create_index(
+            conn, "ix_generated_contents_created_at", "generated_contents", "created_at"
+        )
+        # Citation 表索引 - 加速图谱查询
+        _safe_create_index(conn, "ix_citations_source_paper_id", "citations", "source_paper_id")
+        _safe_create_index(conn, "ix_citations_target_paper_id", "citations", "target_paper_id")
+
+        # collection_actions + action_papers 表
+        try:
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS collection_actions (
+                    id VARCHAR(36) PRIMARY KEY,
+                    action_type VARCHAR(32) NOT NULL,
+                    title VARCHAR(512) NOT NULL,
+                    query VARCHAR(1024),
+                    topic_id VARCHAR(36) REFERENCES topic_subscriptions(id) ON DELETE SET NULL,
+                    paper_count INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            )
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS action_papers (
+                    id VARCHAR(36) PRIMARY KEY,
+                    action_id VARCHAR(36) NOT NULL REFERENCES collection_actions(id) ON DELETE CASCADE,
+                    paper_id VARCHAR(36) NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                    UNIQUE(action_id, paper_id)
+                )
+            """)
+            )
+            _safe_create_index(
+                conn, "ix_collection_actions_type", "collection_actions", "action_type"
+            )
+            _safe_create_index(
+                conn, "ix_collection_actions_created_at", "collection_actions", "created_at"
+            )
+            _safe_create_index(
+                conn, "ix_collection_actions_topic_id", "collection_actions", "topic_id"
+            )
+            _safe_create_index(conn, "ix_action_papers_action_id", "action_papers", "action_id")
+            _safe_create_index(conn, "ix_action_papers_paper_id", "action_papers", "paper_id")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # generated_contents 表（如果不存在则创建）
+        try:
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS generated_contents (
+                    id VARCHAR(36) PRIMARY KEY,
+                    content_type VARCHAR(32) NOT NULL,
+                    title VARCHAR(512) NOT NULL,
+                    keyword VARCHAR(256),
+                    paper_id VARCHAR(36) REFERENCES papers(id) ON DELETE SET NULL,
+                    markdown TEXT NOT NULL,
+                    metadata_json JSON,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            )
+            _safe_create_index(
+                conn, "ix_generated_contents_created_at", "generated_contents", "created_at"
+            )
+            _safe_create_index(
+                conn, "ix_generated_contents_content_type", "generated_contents", "content_type"
+            )
+            _safe_create_index(
+                conn, "ix_generated_contents_paper_id", "generated_contents", "paper_id"
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # 初始化：给没有 action 的已有论文创建 initial_import 记录
+        _init_existing_papers_action(conn)
+
+        # 初始化标签表
+        _init_tags_table(conn)
+        _init_compass_tables(conn)
+
+
+def _init_compass_tables(conn) -> None:
+    """Create ScholarMind recommendation tables when they do not exist."""
+    try:
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS compass_user_profiles (
+                id VARCHAR(36) PRIMARY KEY NOT NULL,
+                user_id VARCHAR(36) NOT NULL UNIQUE,
+                interests TEXT NOT NULL DEFAULT '',
+                research_directions TEXT NOT NULL DEFAULT '',
+                reading_goal TEXT NOT NULL DEFAULT '',
+                quick_profile_json JSON NOT NULL DEFAULT '{}',
+                questions_json JSON NOT NULL DEFAULT '[]',
+                notes_json JSON NOT NULL DEFAULT '[]',
+                confidence FLOAT NOT NULL DEFAULT 0,
+                ai_backend VARCHAR(32) NOT NULL DEFAULT 'llm',
+                codex_cli_path VARCHAR(1024),
+                codex_timeout_ms INTEGER NOT NULL DEFAULT 600000,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        )
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS compass_preference_models (
+                id VARCHAR(36) PRIMARY KEY NOT NULL,
+                user_id VARCHAR(36) NOT NULL UNIQUE,
+                weights_json JSON NOT NULL DEFAULT '{}',
+                bias FLOAT NOT NULL DEFAULT 0,
+                rating_count INTEGER NOT NULL DEFAULT 0,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        )
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS compass_analysis_results (
+                id VARCHAR(36) PRIMARY KEY NOT NULL,
+                user_id VARCHAR(36) NOT NULL,
+                paper_id VARCHAR(36) REFERENCES papers(id) ON DELETE SET NULL,
+                raw_input TEXT NOT NULL DEFAULT '',
+                source_url VARCHAR(2048),
+                source_type VARCHAR(32) NOT NULL DEFAULT 'text',
+                status VARCHAR(32) NOT NULL DEFAULT 'done',
+                paper_json JSON NOT NULL DEFAULT '{}',
+                recommendation_json JSON NOT NULL DEFAULT '{}',
+                final_score FLOAT NOT NULL DEFAULT 0,
+                analysis_blocks_json JSON NOT NULL DEFAULT '[]',
+                trace_json JSON NOT NULL DEFAULT '[]',
+                next_agent_prompt TEXT NOT NULL DEFAULT '',
+                ai_backend VARCHAR(32) NOT NULL DEFAULT 'llm',
+                user_rating INTEGER,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        )
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS compass_feedback (
+                id VARCHAR(36) PRIMARY KEY NOT NULL,
+                user_id VARCHAR(36) NOT NULL,
+                recommendation_id VARCHAR(36) REFERENCES compass_analysis_results(id) ON DELETE SET NULL,
+                paper_id VARCHAR(36) REFERENCES papers(id) ON DELETE SET NULL,
+                rating INTEGER NOT NULL,
+                notes TEXT,
+                factors_json JSON NOT NULL DEFAULT '{}',
+                base_score FLOAT NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        )
+        _safe_create_index(conn, "ix_compass_user_profiles_user_id", "compass_user_profiles", "user_id")
+        _safe_create_index(
+            conn, "ix_compass_preference_models_user_id", "compass_preference_models", "user_id"
+        )
+        _safe_create_index(
+            conn, "ix_compass_analysis_user_id", "compass_analysis_results", "user_id"
+        )
+        _safe_create_index(
+            conn, "ix_compass_analysis_paper_id", "compass_analysis_results", "paper_id"
+        )
+        _safe_create_index(
+            conn, "ix_compass_analysis_final_score", "compass_analysis_results", "final_score"
+        )
+        _safe_create_index(conn, "ix_compass_feedback_user_id", "compass_feedback", "user_id")
+        _safe_create_index(
+            conn, "ix_compass_feedback_recommendation_id", "compass_feedback", "recommendation_id"
+        )
+        _safe_create_index(conn, "ix_compass_feedback_paper_id", "compass_feedback", "paper_id")
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error("Failed to initialize compass tables: %s", e)
+
+
+def _init_tags_table(conn) -> None:
+    """初始化标签表"""
+    try:
+        # 检查 tags 表是否存在
+        result = conn.execute(
+            text("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='tags'
+        """)
+        )
+        tags_exists = result.fetchone() is not None
+
+        if not tags_exists:
+            logger.info("Creating tags table...")
+            conn.execute(
+                text("""
+                CREATE TABLE tags (
+                    id VARCHAR(36) PRIMARY KEY NOT NULL,
+                    name VARCHAR(64) NOT NULL UNIQUE,
+                    color VARCHAR(32) NOT NULL DEFAULT '#3b82f6',
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            )
+            conn.execute(text("CREATE INDEX ix_tags_name ON tags(name)"))
+            logger.info("tags table created")
+
+        # 检查 paper_tags 表是否存在
+        result = conn.execute(
+            text("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='paper_tags'
+        """)
+        )
+        paper_tags_exists = result.fetchone() is not None
+
+        if not paper_tags_exists:
+            logger.info("Creating paper_tags table...")
+            conn.execute(
+                text("""
+                CREATE TABLE paper_tags (
+                    id VARCHAR(36) PRIMARY KEY NOT NULL,
+                    paper_id VARCHAR(36) NOT NULL,
+                    tag_id VARCHAR(36) NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE,
+                    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+                    UNIQUE(paper_id, tag_id)
+                )
+            """)
+            )
+            conn.execute(text("CREATE INDEX ix_paper_tags_paper_id ON paper_tags(paper_id)"))
+            conn.execute(text("CREATE INDEX ix_paper_tags_tag_id ON paper_tags(tag_id)"))
+            logger.info("paper_tags table created")
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error("Failed to initialize tags table: %s", e)
+
+
+def _init_existing_papers_action(conn) -> None:
+    """为没有行动记录的已有论文创建 initial_import 记录（只执行一次）"""
+    try:
+        orphan_rows = conn.execute(
+            text(
+                "SELECT p.id, p.created_at FROM papers p "
+                "WHERE p.id NOT IN (SELECT paper_id FROM action_papers)"
+            )
+        ).fetchall()
+        if not orphan_rows:
+            return
+
+        action_id = _uuid.uuid4().hex[:36]
+        conn.execute(
+            text(
+                "INSERT INTO collection_actions (id, action_type, title, paper_count, created_at) "
+                "VALUES (:id, 'initial_import', :title, :cnt, CURRENT_TIMESTAMP)"
+            ),
+            {
+                "id": action_id,
+                "title": f"初始导入（{len(orphan_rows)} 篇）",
+                "cnt": len(orphan_rows),
+            },
+        )
+
+        for row in orphan_rows:
+            ap_id = _uuid.uuid4().hex[:36]
+            conn.execute(
+                text(
+                    "INSERT INTO action_papers (id, action_id, paper_id) "
+                    "VALUES (:id, :action_id, :paper_id)"
+                ),
+                {"id": ap_id, "action_id": action_id, "paper_id": row[0]},
+            )
+
+        conn.commit()
+        logger.info(
+            "Initialized %d orphan papers into initial_import action %s",
+            len(orphan_rows),
+            action_id,
+        )
+    except Exception:
+        conn.rollback()
+        logger.debug("init_existing_papers_action skipped (already done or error)")

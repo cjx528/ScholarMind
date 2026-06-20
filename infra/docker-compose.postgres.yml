@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: scholarmind-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: scholarmind
+      POSTGRES_USER: scholarmind
+      POSTGRES_PASSWORD: scholarmind
+    ports:
+      - "5432:5432"
+    volumes:
+      - scholarmind_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scholarmind -d scholarmind"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  scholarmind_pgdata:

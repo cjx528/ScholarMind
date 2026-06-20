@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Testing & Linting
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Environment
+.env
+
+# Worktrees
+.worktrees/
+worktrees/
+
+# AI agent config (local only)
+.claude/
+CLAUDE.md
+.spec-workflow/
+.cursor/
+
+# Data (runtime generated)
+data/
+# Logs
+logs/
+*.log
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Package manager
+package-lock.json
+frontend/package-lock.json
+
+# Tauri / Desktop build
+src-tauri/target/
+src-tauri/binaries/
+*.dmg
+*.app
+
+# PyInstaller
+*.spec

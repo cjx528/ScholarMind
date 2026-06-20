@@ -1,0 +1,1222 @@
+/**
+ * 论文收集与订阅管理（重构版：手动抓取 + 丰富结果展示）
+ * @author ScholarMind Team
+ */
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { Button, Empty, Spinner } from "@/components/ui";
+import {
+  Search,
+  Download,
+  Clock,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  AlertTriangle,
+  ArrowUpDown,
+  Power,
+  PowerOff,
+  Sparkles,
+  Pencil,
+  X,
+  Rss,
+  Loader2,
+  FileText,
+  ExternalLink,
+  ChevronDown,
+  ChevronRight,
+  Library,
+  Calendar,
+  Hash,
+  Zap,
+  Play,
+  Layers,
+} from "lucide-react";
+import { ingestApi, topicApi, paperApi } from "@/services/api";
+import { useToast } from "@/contexts/ToastContext";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import type {
+  Topic,
+  ScheduleFrequency,
+  KeywordSuggestion,
+  IngestPaper,
+  TopicFetchResult,
+  MultiSourcePaper,
+  ChannelSuggestion,
+} from "@/types";
+import CSFeeds from "./CSFeeds";
+
+type SortBy = "submittedDate" | "relevance" | "lastUpdatedDate";
+type ActiveTab = "search" | "subscriptions" | "csfeeds" | "multi";
+
+interface SearchResult {
+  ingested: number;
+  papers: IngestPaper[];
+  query: string;
+  sortBy: SortBy;
+  time: string;
+  expanded: boolean;
+}
+
+const FREQ_OPTIONS: { value: ScheduleFrequency; label: string; desc: string }[] = [
+  { value: "daily", label: "每天", desc: "每日自动抓取" },
+  { value: "twice_daily", label: "每天两次", desc: "上午和下午各一次" },
+  { value: "weekdays", label: "工作日", desc: "周一至周五" },
+  { value: "weekly", label: "每周", desc: "每周日" },
+];
+const FREQ_LABEL: Record<string, string> = {
+  daily: "每天",
+  twice_daily: "每天两次",
+  weekdays: "工作日",
+  weekly: "每周",
+};
+
+function utcToBj(utc: number): number {
+  return (utc + 8) % 24;
+}
+function bjToUtc(bj: number): number {
+  return (bj - 8 + 24) % 24;
+}
+function hourOptions(): { value: number; label: string }[] {
+  return Array.from({ length: 24 }, (_, i) => ({
+    value: i,
+    label: `${String(i).padStart(2, "0")}:00`,
+  }));
+}
+
+function relativeTime(iso: string): string {
+  const d = new Date(iso);
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "刚刚";
+  if (mins < 60) return `${mins} 分钟前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} 天前`;
+  return d.toLocaleDateString("zh-CN");
+}
+
+const CHANNEL_MAP: Record<string, { id: string; name: string; isFree: boolean }> = {
+  arxiv: { id: "arxiv", name: "ArXiv", isFree: true },
+  openalex: { id: "openalex", name: "OpenAlex", isFree: true },
+  semantic_scholar: { id: "semantic_scholar", name: "Semantic Scholar", isFree: true },
+  dblp: { id: "dblp", name: "DBLP", isFree: true },
+  openreview: { id: "openreview", name: "OpenReview", isFree: true },
+  biorxiv: { id: "biorxiv", name: "bioRxiv", isFree: true },
+};
+
+export default function Collect() {
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  // ========== Tab 切换 ==========
+  const [activeTab, setActiveTab] = useState<ActiveTab>("search");
+
+  // ========== 即时搜索 ==========
+  const [query, setQuery] = useState("");
+  const [maxResults, setMaxResults] = useState(20);
+  const [sortBy, setSortBy] = useState<SortBy>("submittedDate");
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [error, setError] = useState("");
+
+  // ========== 多源搜索 ==========
+  const [multiQuery, setMultiQuery] = useState("");
+  const [multiChannels, setMultiChannels] = useState<string[]>(["arxiv"]);
+  const [multiLoading, setMultiLoading] = useState(false);
+  const [multiResults, setMultiResults] = useState<MultiSourcePaper[]>([]);
+  const [multiSuggestions, setMultiSuggestions] = useState<ChannelSuggestion | null>(null);
+
+  const handleMultiSearch = useCallback(async (q: string, channels: string[]) => {
+    if (!q.trim()) return;
+    setMultiLoading(true);
+    try {
+      const res = await paperApi.multiSourceSearch(q.trim(), channels);
+      setMultiResults(res.results || []);
+      if (res.results && res.results.length > 0) {
+        toast("success", `找到 ${res.results.length} 篇相关论文`);
+      } else {
+        toast("info", "未找到相关论文");
+      }
+    } catch (err) {
+      toast("error", err instanceof Error ? err.message : "搜索失败");
+    } finally {
+      setMultiLoading(false);
+    }
+  }, [toast]);
+
+  const fetchMultiSuggestions = useCallback(async (q: string) => {
+    if (!q.trim()) { setMultiSuggestions(null); return; }
+    try {
+      const res = await paperApi.suggestChannels(q.trim());
+      setMultiSuggestions(res);
+    } catch { /* quiet */ }
+  }, []);
+
+  const applyMultiRecommendation = useCallback(() => {
+    if (multiSuggestions?.recommended) {
+      setMultiChannels(multiSuggestions.recommended);
+    }
+  }, [multiSuggestions]);
+
+  // ========== 订阅管理 ==========
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchingTopicId, setFetchingTopicId] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  // ========== 表单 ==========
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [formName, setFormName] = useState("");
+  const [formQuery, setFormQuery] = useState("");
+  const [formMax, setFormMax] = useState(20);
+  const [formFreq, setFormFreq] = useState<ScheduleFrequency>("daily");
+  const [formTimeBj, setFormTimeBj] = useState(5);
+  const [saving, setSaving] = useState(false);
+
+  // ========== AI 建议 ==========
+  const [aiDesc, setAiDesc] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<KeywordSuggestion[]>([]);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    topicApi
+      .list(false)
+      .then((r) => {
+        setTopics(r.items);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  // ========== 即时搜索 ==========
+  const handleSearch = useCallback(async () => {
+    if (!query.trim()) return;
+    setSearching(true);
+    setError("");
+    try {
+      const res = await ingestApi.arxiv(query.trim(), maxResults, undefined, sortBy);
+      setResults((prev) => [
+        {
+          ingested: res.ingested,
+          papers: res.papers || [],
+          query: query.trim(),
+          sortBy,
+          time: new Date().toLocaleTimeString("zh-CN"),
+          expanded: true,
+        },
+        ...prev.map((r) => ({ ...r, expanded: false })),
+      ]);
+      if (res.ingested > 0) toast("success", `成功收集 ${res.ingested} 篇论文`);
+      else toast("info", "未找到新论文（可能已全部收集）");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "搜索失败");
+    } finally {
+      setSearching(false);
+    }
+  }, [query, maxResults, sortBy, toast]);
+
+  // ========== 手动抓取订阅 ==========
+  const handleManualFetch = useCallback(
+    async (topicId: string) => {
+      setFetchingTopicId(topicId);
+      try {
+        const res: TopicFetchResult = await topicApi.fetch(topicId);
+        if (res.status === "started" || res.status === "already_running") {
+          toast("info", res.topic_name || "抓取已在后台启动...");
+          // 轮询状态
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = setInterval(async () => {
+            try {
+              const status = await topicApi.fetchStatus(topicId);
+              if (status.status === "running") {
+                // 显示进度
+                toast("info", "抓取中...");
+                return;
+              }
+              if (pollRef.current) {
+                clearInterval(pollRef.current);
+                pollRef.current = null;
+              }
+              setFetchingTopicId(null);
+              if (status.status === "ok" || status.status === "no_new_papers") {
+                const newCount = status.inserted;
+                const processed = status.processed ?? 0;
+                let msg = `抓取完成：${newCount} 篇新论文`;
+                if (processed > 0) msg += `，${processed} 篇处理`;
+                toast("success", msg);
+                // 显示进度
+                return;
+              }
+              if (pollRef.current) {
+                clearInterval(pollRef.current);
+                pollRef.current = null;
+              }
+              setFetchingTopicId(null);
+              if (status.status === "ok" || status.status === "no_new_papers") {
+                // 刷新整个订阅列表，确保 last_run_at 和 paper_count 更新
+                const list = await topicApi.list(false);
+                setTopics(list.items);
+                return;
+              }
+              if (status.status === "failed") {
+                toast("error", `抓取失败：${status.error || "未知错误"}`);
+              }
+              // 无论如何都刷新列表
+              const list = await topicApi.list(false);
+              setTopics(list.items);
+            } catch {
+              if (pollRef.current) {
+                clearInterval(pollRef.current);
+                pollRef.current = null;
+              }
+              setFetchingTopicId(null);
+            }
+          }, 3000);
+          return;
+        }
+        if (res.status === "ok") {
+          const newCount = res.inserted;
+          const processed = res.processed ?? 0;
+          let msg = `抓取完成：${newCount} 篇新论文`;
+          if (processed > 0) msg += `，${processed} 篇处理`;
+          toast("success", msg);
+          const list = await topicApi.list(false);
+          setTopics(list.items);
+        } else if (res.status === "no_new_papers") {
+          toast("info", `⚠️  没有新论文，已跳过处理`);
+        } else {
+          toast("error", `抓取失败：${res.error || "未知错误"}`);
+        }
+      } catch (err) {
+        toast("error", err instanceof Error ? err.message : "抓取失败");
+      } finally {
+        setFetchingTopicId(null);
+      }
+    },
+    [toast]
+  );
+
+  // ========== AI 建议 ==========
+  const handleAiSuggest = useCallback(async () => {
+    const desc = aiDesc.trim() || formQuery.trim() || query.trim();
+    if (!desc) return;
+    setAiLoading(true);
+    setSuggestions([]);
+    try {
+      const res = await topicApi.suggestKeywords(desc);
+      setSuggestions(res.suggestions);
+    } catch {
+      setError("AI 建议失败");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [aiDesc, formQuery, query]);
+
+  const applySuggestion = useCallback((s: KeywordSuggestion) => {
+    setFormName(s.name);
+    setFormQuery(s.query);
+    setSuggestions([]);
+    setAiDesc("");
+  }, []);
+
+  // ========== 表单操作 ==========
+  const resetForm = useCallback(() => {
+    setShowForm(false);
+    setEditId(null);
+    setFormName("");
+    setFormQuery("");
+    setFormMax(20);
+    setFormFreq("daily");
+    setFormTimeBj(5);
+    setSuggestions([]);
+    setAiDesc("");
+  }, []);
+  const openAdd = useCallback(() => {
+    resetForm();
+    setShowForm(true);
+  }, [resetForm]);
+  const openEdit = useCallback((t: Topic) => {
+    setEditId(t.id);
+    setFormName(t.name);
+    setFormQuery(t.query);
+    setFormMax(t.max_results_per_run);
+    setFormFreq(t.schedule_frequency || "daily");
+    setFormTimeBj(utcToBj(t.schedule_time_utc ?? 21));
+    setSuggestions([]);
+    setAiDesc("");
+    setShowForm(true);
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!formName.trim() || !formQuery.trim()) return;
+    setSaving(true);
+    try {
+      const utcHour = bjToUtc(formTimeBj);
+      if (editId) {
+        const updated = await topicApi.update(editId, {
+          query: formQuery.trim(),
+          max_results_per_run: formMax,
+          schedule_frequency: formFreq,
+          schedule_time_utc: utcHour,
+        });
+        setTopics((prev) => prev.map((x) => (x.id === editId ? updated : x)));
+      } else {
+        const topic = await topicApi.create({
+          name: formName.trim(),
+          query: formQuery.trim(),
+          enabled: true,
+          max_results_per_run: formMax,
+          schedule_frequency: formFreq,
+          schedule_time_utc: utcHour,
+        });
+        setTopics((prev) => [topic, ...prev]);
+      }
+      resetForm();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }, [formName, formQuery, formMax, formFreq, formTimeBj, editId, resetForm]);
+
+  const handleToggle = useCallback(
+    async (t: Topic) => {
+      try {
+        const updated = await topicApi.update(t.id, { enabled: !t.enabled });
+        setTopics((prev) => prev.map((x) => (x.id === t.id ? updated : x)));
+      } catch {
+        toast("error", "切换订阅状态失败");
+      }
+    },
+    [toast]
+  );
+  const handleDelete = useCallback(async (id: string) => {
+    try {
+      await topicApi.delete(id);
+      setTopics((prev) => prev.filter((t) => t.id !== id));
+    } catch {
+      toast("error", "删除订阅失败");
+    }
+  }, []);
+
+  return (
+    <div className="animate-fade-in space-y-6">
+      {/* 页面头 */}
+      <div className="page-hero rounded-2xl p-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-primary/10 rounded-xl p-2.5">
+              <Download className="text-primary h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-ink text-2xl font-bold">论文收集</h1>
+              <p className="text-ink-secondary mt-0.5 text-sm">搜索下载论文 · 创建订阅自动收集</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tab 切换 */}
+      <div className="bg-surface border-border mx-auto flex w-fit gap-2 rounded-xl border p-1.5">
+        <button
+          onClick={() => setActiveTab("search")}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium transition-all ${
+            activeTab === "search"
+              ? "bg-primary text-white shadow-sm"
+              : "text-ink-secondary hover:text-ink hover:bg-muted"
+          }`}
+        >
+          <Search className="h-4 w-4" />
+          即时搜索
+        </button>
+        <button
+          onClick={() => setActiveTab("subscriptions")}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium transition-all ${
+            activeTab === "subscriptions"
+              ? "bg-primary text-white shadow-sm"
+              : "text-ink-secondary hover:text-ink hover:bg-muted"
+          }`}
+        >
+          <Rss className="h-4 w-4" />
+          主题订阅
+        </button>
+        <button
+          onClick={() => setActiveTab("csfeeds")}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium transition-all ${
+            activeTab === "csfeeds"
+              ? "bg-primary text-white shadow-sm"
+              : "text-ink-secondary hover:text-ink hover:bg-muted"
+          }`}
+        >
+          <Layers className="h-4 w-4" />
+          分类订阅
+        </button>
+        <button
+          onClick={() => setActiveTab("multi")}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium transition-all ${
+            activeTab === "multi"
+              ? "bg-primary text-white shadow-sm"
+              : "text-ink-secondary hover:text-ink hover:bg-muted"
+          }`}
+        >
+          <Sparkles className="h-4 w-4" />
+          多源搜索
+        </button>
+      </div>
+
+      {/* 错误 */}
+      {error && (
+        <div className="border-error/20 bg-error-light flex items-center gap-2 rounded-xl border px-4 py-3">
+          <AlertTriangle className="text-error h-4 w-4" />
+          <p className="text-error flex-1 text-sm">{error}</p>
+          <button
+            aria-label="关闭"
+            onClick={() => setError("")}
+            className="text-error/60 hover:text-error"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* ================================================================
+       * 即时搜索区
+       * ================================================================ */}
+      {activeTab === "search" && (
+        <div className="border-border bg-surface rounded-2xl border p-6 shadow-sm">
+          <div className="mb-5 flex items-center gap-2">
+            <div className="bg-primary/8 rounded-xl p-2">
+              <Search className="text-primary h-4 w-4" />
+            </div>
+            <div>
+              <h2 className="text-ink text-sm font-semibold">即时搜索</h2>
+              <p className="text-ink-tertiary text-xs">
+                输入关键词从 arXiv 搜索，论文直接下载到本地库
+              </p>
+            </div>
+          </div>
+
+          {/* 搜索栏 */}
+          <div className="flex gap-3">
+            <div className="relative flex-1">
+              <Search className="text-ink-tertiary absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSearch();
+                }}
+                placeholder="3D reconstruction, NeRF, LLM alignment..."
+                className="border-border bg-page text-ink placeholder:text-ink-placeholder focus:border-primary focus:ring-primary/20 h-11 w-full rounded-xl border pr-4 pl-10 text-sm focus:ring-2 focus:outline-none"
+              />
+            </div>
+            <Button
+              icon={
+                searching ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )
+              }
+              onClick={handleSearch}
+              loading={searching}
+              disabled={!query.trim()}
+            >
+              搜索下载
+            </Button>
+          </div>
+
+          {/* 筛选条件 */}
+          <div className="mt-3 flex flex-wrap items-center gap-4">
+            <label className="text-ink-secondary flex items-center gap-2 text-xs">
+              <Hash className="h-3 w-3" /> 数量
+              <select
+                value={maxResults}
+                onChange={(e) => setMaxResults(Number(e.target.value))}
+                className="border-border bg-surface text-ink h-7 rounded-lg border px-2 text-xs"
+              >
+                {[10, 20, 50, 100].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-ink-secondary flex items-center gap-2 text-xs">
+              <ArrowUpDown className="h-3 w-3" /> 排序
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortBy)}
+                className="border-border bg-surface text-ink h-7 rounded-lg border px-2 text-xs"
+              >
+                <option value="submittedDate">最新提交</option>
+                <option value="relevance">相关性</option>
+                <option value="lastUpdatedDate">最近更新</option>
+              </select>
+            </label>
+            {query.trim() && (
+              <button
+                onClick={() => {
+                  setFormName(query.trim());
+                  setFormQuery(query.trim());
+                  setFormMax(maxResults);
+                  setShowForm(true);
+                  setActiveTab("subscriptions");
+                }}
+                className="bg-primary/8 text-primary hover:bg-primary/15 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+              >
+                <Clock className="h-3 w-3" /> 存为订阅
+              </button>
+            )}
+          </div>
+
+          {/* 搜索结果 */}
+          {results.length > 0 && (
+            <div className="mt-5 space-y-3">
+              {results.map((r, i) => (
+                <SearchResultCard
+                  key={`result-${r.query}-${i}`}
+                  result={r}
+                  onToggle={() =>
+                    setResults((prev) =>
+                      prev.map((x, j) => (j === i ? { ...x, expanded: !x.expanded } : x))
+                    )
+                  }
+                  onNavigate={(paperId) => navigate(`/papers/${paperId}`)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "multi" && (
+        <div className="border-border bg-surface rounded-2xl border p-6 shadow-sm">
+          <div className="mb-5 flex items-center gap-2">
+            <div className="bg-primary/8 rounded-xl p-2">
+              <Sparkles className="text-primary h-4 w-4" />
+            </div>
+            <div>
+              <h2 className="text-ink text-sm font-semibold">多源搜索</h2>
+              <p className="text-ink-tertiary text-xs">
+                从 ArXiv、OpenAlex、Semantic Scholar 等多渠道并行搜索
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex gap-3">
+              <div className="relative flex-1">
+                <Search className="text-ink-tertiary absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={multiQuery}
+                  onChange={(e) => {
+                    setMultiQuery(e.target.value);
+                    fetchMultiSuggestions(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleMultiSearch(multiQuery, multiChannels);
+                  }}
+                  placeholder="输入关键词，如 machine learning transformer"
+                  className="border-border bg-page text-ink placeholder:text-ink-placeholder focus:border-primary focus:ring-primary/20 h-11 w-full rounded-xl border pr-4 pl-10 text-sm focus:ring-2 focus:outline-none"
+                />
+              </div>
+              <Button
+                onClick={() => handleMultiSearch(multiQuery, multiChannels)}
+                loading={multiLoading}
+                disabled={!multiQuery.trim() || multiChannels.length === 0}
+                icon={<Download className="h-4 w-4" />}
+              >
+                搜索
+              </Button>
+            </div>
+
+            {multiSuggestions && multiSuggestions.recommended.length > 0 && (
+              <div className="flex items-center gap-2 text-sm">
+                <Sparkles className="h-4 w-4 text-purple-500" />
+                <span className="text-ink-secondary">推荐渠道：</span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {multiSuggestions.recommended.map((id) => {
+                    const ch = CHANNEL_MAP[id];
+                    return ch ? (
+                      <span
+                        key={id}
+                        className="inline-flex items-center px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-xs dark:bg-purple-900/30 dark:text-purple-400"
+                      >
+                        {ch.name}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+                {JSON.stringify(multiSuggestions.recommended.sort()) !== JSON.stringify(multiChannels.sort()) && (
+                  <button
+                    type="button"
+                    onClick={applyMultiRecommendation}
+                    className="text-blue-500 hover:text-blue-600 text-xs"
+                  >
+                    应用推荐
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm text-ink-secondary">渠道：</span>
+              {Object.values(CHANNEL_MAP).map((channel) => {
+                const isSelected = multiChannels.includes(channel.id);
+                return (
+                  <button
+                    key={channel.id}
+                    type="button"
+                    onClick={() => {
+                      setMultiChannels((prev) =>
+                        prev.includes(channel.id)
+                          ? prev.filter((id) => id !== channel.id)
+                          : [...prev, channel.id]
+                      );
+                    }}
+                    className={`
+                      inline-flex items-center px-3 py-1 rounded-full text-sm border transition-all
+                      ${
+                        isSelected
+                          ? "bg-primary text-white border-primary"
+                          : "bg-page text-ink-secondary border-border hover:border-ink-tertiary"
+                      }
+                    `}
+                  >
+                    {channel.name}
+                    {!channel.isFree && <span className="ml-1 text-[10px]">💰</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {multiLoading && (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          )}
+
+          {!multiLoading && multiResults.length === 0 && multiQuery.trim() && (
+            <div className="flex flex-col items-center gap-3 pt-8 text-center">
+              <Search className="h-10 w-10 text-ink-tertiary" />
+              <p className="text-sm text-ink-secondary">输入关键词开始多源搜索</p>
+            </div>
+          )}
+
+          {!multiLoading && multiResults.length > 0 && (
+            <div className="mt-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-ink-secondary">
+                  共找到 <span className="font-medium text-ink">{multiResults.length}</span> 篇论文
+                </p>
+              </div>
+              {multiResults.map((paper: MultiSourcePaper, idx: number) => {
+                const primarySource = paper.sources?.[0]?.channel;
+                return (
+                  <div
+                    key={paper.id || idx}
+                    className="border-border bg-page rounded-xl border p-4 hover:border-ink-tertiary transition-colors"
+                  >
+                    <h4 className="mb-1 text-sm font-medium text-ink line-clamp-2">{paper.title}</h4>
+                    {paper.authors && paper.authors.length > 0 && (
+                      <p className="mb-2 text-xs text-ink-tertiary">
+                        {paper.authors.slice(0, 3).join(", ")}
+                        {paper.authors.length > 3 && " et al."}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2">
+                      {primarySource && (
+                        <span className="inline-flex items-center rounded bg-primary/20 px-2 py-0.5 text-[10px] text-primary">
+                          {primarySource}
+                        </span>
+                      )}
+                      {paper.year && (
+                        <span className="text-[10px] text-ink-tertiary">{paper.year}</span>
+                      )}
+                      {paper.venue && (
+                        <span className="text-[10px] text-ink-tertiary">{paper.venue}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================================================================
+       * 自动订阅管理
+       * ================================================================ */}
+      {activeTab === "subscriptions" && (
+        <div className="border-border bg-surface rounded-2xl border p-6 shadow-sm">
+          <div className="mb-5 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="bg-info/8 rounded-xl p-2">
+                <Rss className="text-info h-4 w-4" />
+              </div>
+              <div>
+                <h2 className="text-ink text-sm font-semibold">自动订阅</h2>
+                <p className="text-ink-tertiary text-xs">定时自动收集，也可随时手动触发</p>
+              </div>
+            </div>
+            <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={openAdd}>
+              新建订阅
+            </Button>
+          </div>
+
+          {/* 新建/编辑表单 */}
+          {showForm && (
+            <div className="border-primary/20 bg-primary/[0.02] mb-5 rounded-2xl border p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-ink flex items-center gap-2 text-sm font-semibold">
+                  {editId ? (
+                    <Pencil className="text-primary h-4 w-4" />
+                  ) : (
+                    <Plus className="text-primary h-4 w-4" />
+                  )}
+                  {editId ? "编辑订阅" : "新建订阅"}
+                </h3>
+                <button
+                  aria-label="关闭"
+                  onClick={resetForm}
+                  className="text-ink-tertiary hover:bg-hover rounded-lg p-1"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <FormField label="订阅名称" hint="给这个订阅起个名字">
+                    <input
+                      value={formName}
+                      onChange={(e) => setFormName(e.target.value)}
+                      placeholder="例：3D 重建"
+                      disabled={!!editId}
+                      className="form-input"
+                    />
+                  </FormField>
+                  <FormField label="搜索关键词" hint="arXiv API 搜索表达式">
+                    <input
+                      value={formQuery}
+                      onChange={(e) => setFormQuery(e.target.value)}
+                      placeholder="all:NeRF AND all:3D"
+                      className="form-input"
+                    />
+                  </FormField>
+                  <FormField label="每次数量" hint="单次最多抓取篇数">
+                    <select
+                      value={formMax}
+                      onChange={(e) => setFormMax(Number(e.target.value))}
+                      className="form-input"
+                    >
+                      {[10, 20, 50].map((n) => (
+                        <option key={n} value={n}>
+                          {n} 篇
+                        </option>
+                      ))}
+                    </select>
+                  </FormField>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <FormField label="抓取频率">
+                    <div className="grid grid-cols-2 gap-2">
+                      {FREQ_OPTIONS.map((o) => (
+                        <button
+                          key={o.value}
+                          onClick={() => setFormFreq(o.value)}
+                          className={`rounded-lg border px-3 py-2 text-left text-xs transition-all ${formFreq === o.value ? "border-primary bg-primary/8 text-primary" : "border-border bg-surface text-ink-secondary hover:border-border/80"}`}
+                        >
+                          <span className="font-medium">{o.label}</span>
+                          <span className="text-ink-tertiary ml-1">{o.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </FormField>
+                  <FormField label="执行时间（北京时间）" hint="系统在指定时间自动抓取">
+                    <select
+                      value={formTimeBj}
+                      onChange={(e) => setFormTimeBj(Number(e.target.value))}
+                      className="form-input"
+                    >
+                      {hourOptions().map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </FormField>
+                </div>
+
+                {/* AI 关键词建议 */}
+                <div className="border-primary/20 bg-primary/[0.02] rounded-xl border border-dashed p-4">
+                  <label className="text-primary mb-2 flex items-center gap-1.5 text-xs font-medium">
+                    <Sparkles className="h-3.5 w-3.5" /> AI 关键词助手
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        value={aiDesc}
+                        onChange={(e) => setAiDesc(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleAiSuggest();
+                        }}
+                        placeholder="用自然语言描述你的研究兴趣，AI 自动生成搜索词..."
+                        className="border-border bg-surface text-ink placeholder:text-ink-placeholder focus:border-primary focus:ring-primary/20 h-9 w-full rounded-lg border px-3 text-xs focus:ring-1 focus:outline-none"
+                      />
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={
+                        aiLoading ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3" />
+                        )
+                      }
+                      onClick={handleAiSuggest}
+                      disabled={aiLoading || (!aiDesc.trim() && !formQuery.trim() && !query.trim())}
+                    >
+                      生成
+                    </Button>
+                  </div>
+                  {suggestions.length > 0 && (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {suggestions.map((s, i) => (
+                        <button
+                          key={s.name || `suggestion-${i}`}
+                          type="button"
+                          onClick={() => applySuggestion(s)}
+                          className="border-border bg-surface hover:border-primary/30 flex items-start gap-2 rounded-xl border p-3 text-left transition-all hover:shadow-sm"
+                        >
+                          <Zap className="mt-0.5 h-3 w-3 shrink-0 text-amber-500" />
+                          <div className="min-w-0">
+                            <p className="text-ink text-xs font-medium">{s.name}</p>
+                            <p className="text-primary/70 mt-0.5 font-mono text-[10px]">
+                              {s.query}
+                            </p>
+                            <p className="text-ink-tertiary mt-0.5 text-[10px]">{s.reason}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    icon={
+                      editId ? (
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      ) : (
+                        <Plus className="h-3.5 w-3.5" />
+                      )
+                    }
+                    onClick={handleSave}
+                    loading={saving}
+                    disabled={!formName.trim() || !formQuery.trim()}
+                  >
+                    {editId ? "保存修改" : "创建订阅"}
+                  </Button>
+                  <Button variant="secondary" onClick={resetForm}>
+                    取消
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 订阅列表 */}
+          {loading ? (
+            <Spinner text="加载订阅列表..." />
+          ) : topics.length === 0 ? (
+            <Empty
+              icon={<Rss className="h-12 w-12" />}
+              title="暂无订阅"
+              description="创建订阅后系统会按设定的频率自动收集论文"
+              action={
+                <Button size="sm" onClick={openAdd}>
+                  创建第一个订阅
+                </Button>
+              }
+            />
+          ) : (
+            <div className="space-y-3">
+              {topics.map((t) => (
+                <TopicCard
+                  key={t.id}
+                  topic={t}
+                  fetching={fetchingTopicId === t.id}
+                  onEdit={() => openEdit(t)}
+                  onToggle={() => handleToggle(t)}
+                  onDelete={() => setConfirmDeleteId(t.id)}
+                  onFetch={() => handleManualFetch(t.id)}
+                  onNavigate={() => navigate(`/papers?topicId=${t.id}`)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================================================================
+       * 分类订阅
+       * ================================================================ */}
+      {activeTab === "csfeeds" && <CSFeeds />}
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="删除订阅"
+        description="删除后将停止自动收集该主题的论文，确定要删除吗？"
+        variant="danger"
+        confirmLabel="删除"
+        onConfirm={async () => {
+          if (confirmDeleteId) {
+            await handleDelete(confirmDeleteId);
+            setConfirmDeleteId(null);
+          }
+        }}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
+    </div>
+  );
+}
+
+/* ================================================================
+ * 订阅卡片
+ * ================================================================ */
+function TopicCard({
+  topic: t,
+  fetching,
+  onEdit,
+  onToggle,
+  onDelete,
+  onFetch,
+  onNavigate,
+}: {
+  topic: Topic;
+  fetching: boolean;
+  onEdit: () => void;
+  onToggle: () => void;
+  onDelete: () => void;
+  onFetch: () => void;
+  onNavigate: () => void;
+}) {
+  const bjHour = utcToBj(t.schedule_time_utc ?? 21);
+  const freqLabel = FREQ_LABEL[t.schedule_frequency] || "每天";
+
+  return (
+    <div
+      className={`group rounded-xl border transition-all ${t.enabled ? "border-border bg-page hover:border-primary/20 hover:shadow-sm" : "border-border/50 bg-page/50 opacity-70"}`}
+    >
+      <div className="flex items-start gap-3 px-4 py-3.5">
+        {/* 状态指示灯 */}
+        <div className="mt-1.5 flex flex-col items-center gap-1">
+          <div
+            className={`h-2.5 w-2.5 rounded-full ${t.enabled ? "bg-success" : "bg-ink-tertiary"} ${t.enabled ? "animate-pulse" : ""}`}
+          />
+        </div>
+
+        {/* 主体信息 */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-ink text-sm font-semibold">{t.name}</h3>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${t.enabled ? "bg-success/10 text-success" : "bg-ink-tertiary/10 text-ink-tertiary"}`}
+            >
+              {t.enabled ? "运行中" : "已暂停"}
+            </span>
+          </div>
+
+          {/* 搜索词 */}
+          <p className="text-ink-tertiary mt-1 font-mono text-xs">{t.query}</p>
+
+          {/* 统计信息 */}
+          <div className="text-ink-secondary mt-2 flex flex-wrap items-center gap-3 text-[11px]">
+            <span className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {freqLabel} {String(bjHour).padStart(2, "0")}:00
+            </span>
+            <span className="flex items-center gap-1">
+              <Hash className="h-3 w-3" />
+              每次 {t.max_results_per_run} 篇
+            </span>
+            {(t.paper_count ?? 0) > 0 && (
+              <button
+                onClick={onNavigate}
+                className="text-primary flex items-center gap-1 hover:underline"
+              >
+                <Library className="h-3 w-3" />
+                已收集 {t.paper_count} 篇
+              </button>
+            )}
+            {t.last_run_at && (
+              <span className="flex items-center gap-1">
+                <Calendar className="h-3 w-3" />
+                上次: {relativeTime(t.last_run_at)}
+                {t.last_run_count != null && <> · {t.last_run_count} 篇</>}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* 操作按钮 */}
+        <div className="flex shrink-0 items-center gap-1">
+          {/* 手动抓取按钮 */}
+          <button
+            onClick={onFetch}
+            disabled={fetching}
+            className="bg-primary/8 text-primary hover:bg-primary/15 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all disabled:opacity-50"
+            title="立即抓取最新论文"
+          >
+            {fetching ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
+            {fetching ? "抓取中..." : "手动抓取"}
+          </button>
+
+          <div className="bg-border mx-1 h-5 w-px" />
+
+          <button
+            aria-label="编辑"
+            onClick={onEdit}
+            className="text-ink-tertiary hover:bg-hover hover:text-ink rounded-lg p-1.5"
+            title="编辑订阅"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            aria-label={t.enabled ? "暂停" : "启用"}
+            onClick={onToggle}
+            className={`rounded-lg p-1.5 ${t.enabled ? "text-success hover:bg-success-light" : "text-ink-tertiary hover:bg-hover"}`}
+            title={t.enabled ? "暂停自动抓取" : "启用自动抓取"}
+          >
+            {t.enabled ? <Power className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            aria-label="删除"
+            onClick={onDelete}
+            className="text-ink-tertiary hover:bg-error-light hover:text-error rounded-lg p-1.5"
+            title="删除订阅"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+ * 即时搜索结果卡片
+ * ================================================================ */
+function SearchResultCard({
+  result: r,
+  onToggle,
+  onNavigate,
+}: {
+  result: SearchResult;
+  onToggle: () => void;
+  onNavigate: (id: string) => void;
+}) {
+  return (
+    <div className="border-success/20 bg-success/[0.03] rounded-xl border transition-all">
+      {/* 头部：摘要信息 */}
+      <button onClick={onToggle} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+        <CheckCircle2 className="text-success h-4 w-4 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-ink text-sm font-medium">&quot;{r.query}&quot;</span>
+            <span className="bg-success/10 text-success rounded-full px-2 py-0.5 text-[10px] font-semibold">
+              {r.ingested} 篇
+            </span>
+          </div>
+          {r.papers.length > 0 && !r.expanded && (
+            <p className="text-ink-tertiary mt-0.5 truncate text-xs">
+              {r.papers
+                .slice(0, 3)
+                .map((p) => p.title)
+                .join(" · ")}
+            </p>
+          )}
+        </div>
+        <span className="text-ink-tertiary shrink-0 text-[10px]">{r.time}</span>
+        {r.papers.length > 0 &&
+          (r.expanded ? (
+            <ChevronDown className="text-ink-tertiary h-4 w-4 shrink-0" />
+          ) : (
+            <ChevronRight className="text-ink-tertiary h-4 w-4 shrink-0" />
+          ))}
+      </button>
+
+      {/* 展开：论文列表 */}
+      {r.expanded && r.papers.length > 0 && (
+        <div className="border-success/10 border-t px-4 py-2">
+          <div className="space-y-1.5">
+            {r.papers.map((p) => (
+              <div
+                key={p.id}
+                className="hover:bg-success/5 flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors"
+              >
+                <FileText className="text-ink-tertiary h-3.5 w-3.5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-ink truncate text-xs font-medium">{p.title}</p>
+                  <div className="text-ink-tertiary flex items-center gap-2 text-[10px]">
+                    {p.arxiv_id && <span>{p.arxiv_id}</span>}
+                    {p.publication_date && <span>{p.publication_date}</span>}
+                  </div>
+                </div>
+                <button
+                  onClick={() => onNavigate(p.id)}
+                  className="text-ink-tertiary hover:bg-primary/10 hover:text-primary shrink-0 rounded-md p-1 transition-colors"
+                  title="查看论文"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+ * 通用表单字段
+ * ================================================================ */
+function FormField({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-ink-secondary block text-xs font-medium">{label}</label>
+      {hint && <p className="text-ink-tertiary text-[10px]">{hint}</p>}
+      {children}
+    </div>
+  );
+}

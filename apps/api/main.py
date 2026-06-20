@@ -1,0 +1,188 @@
+"""
+ScholarMind API - FastAPI 入口
+@author ScholarMind Team
+"""
+
+import logging
+import time
+import uuid as _uuid
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
+
+from packages.auth import decode_access_token
+from packages.config import get_settings
+from packages.domain.exceptions import AppError
+from packages.logging_setup import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
+
+# ---------- 请求日志中间件 ----------
+
+
+api_logger = logging.getLogger("scholarmind.api")
+
+
+class RequestLogMiddleware(BaseHTTPMiddleware):
+    """记录每个请求的方法、路径、状态码、耗时"""
+
+    async def dispatch(self, request: Request, call_next):
+        req_id = _uuid.uuid4().hex[:8]
+        request.state.request_id = req_id
+        start = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        api_logger.info(
+            "[%s] %s %s → %d (%.0fms)",
+            req_id,
+            request.method,
+            request.url.path,
+            response.status_code,
+            elapsed_ms,
+        )
+        response.headers["X-Request-Id"] = req_id
+        return response
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """认证中间件 - 保护所有 API（白名单除外）"""
+
+    # 白名单路径（无需认证）
+    WHITELIST = {
+        "/health",
+        "/auth/login",
+        "/auth/status",
+    }
+    WHITELIST_PREFIXES = (
+        "/recommendation",
+    )
+
+    async def dispatch(self, request: Request, call_next):
+        # 未配置密码则跳过认证
+        if not settings.auth_password:
+            return await call_next(request)
+
+        # OPTIONS preflight 请求放行（CORS 需要）
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
+        # 白名单路径跳过认证
+        if request.url.path in self.WHITELIST:
+            return await call_next(request)
+        if any(request.url.path.startswith(prefix) for prefix in self.WHITELIST_PREFIXES):
+            return await call_next(request)
+
+        # 静态文件和文档跳过
+        if request.url.path.startswith("/docs") or request.url.path.startswith("/openapi"):
+            return await call_next(request)
+
+        # 验证 Authorization header 或 query param token
+        auth_header = request.headers.get("Authorization")
+        token: str | None = None
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "")
+        else:
+            # 支持 query param token（用于 PDF/图片等浏览器直接请求）
+            token = request.query_params.get("token")
+
+        if not token:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Not authenticated"},
+            )
+
+        payload = decode_access_token(token)
+        if not payload:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or expired token"},
+            )
+
+        # 将用户信息存入 request.state
+        request.state.user = payload
+        return await call_next(request)
+
+
+# ---------- 启动时检查认证配置 ----------
+
+settings = get_settings()
+
+if settings.auth_password and not settings.auth_secret_key:
+    raise RuntimeError(
+        "安全错误: 启用了 AUTH_PASSWORD 但未配置 AUTH_SECRET_KEY。"
+        "请在 .env 中设置一个强随机密钥，例如: AUTH_SECRET_KEY=$(openssl rand -hex 32)"
+    )
+
+app = FastAPI(title=settings.app_name)
+
+# 中间件注册顺序：Starlette 中间件为倒序执行（最后注册的最先执行）
+# 执行顺序: CORS -> GZip -> Auth -> RequestLog -> 路由处理
+app.add_middleware(RequestLogMiddleware)
+app.add_middleware(AuthMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1000)  # Starlette 内置跳过 text/event-stream
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(_request: Request, exc: AppError):
+    """统一处理所有业务异常"""
+    api_logger.warning("[%s] %s: %s", exc.error_type, exc.__class__.__name__, exc.message)
+    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+
+
+origins = [x.strip() for x in settings.cors_allow_origins.split(",") if x.strip()]
+if origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins if origins != ["*"] else ["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+# ---------- 数据库迁移 ----------
+
+from packages.storage.db import run_migrations  # noqa: E402
+
+run_migrations()
+
+
+# ---------- 注册路由 ----------
+
+from apps.api.routers import (  # noqa: E402
+    agent,
+    auth,
+    content,
+    cs_feeds,
+    jobs,
+    llm_configs,
+    papers,
+    pipelines,
+    recommendation,
+    sensemaking,
+    system,
+    tags,
+    topics,
+)
+from apps.api.routers import (  # noqa: E402
+    settings as settings_router,
+)
+
+app.include_router(system.router)
+app.include_router(papers.router)
+app.include_router(recommendation.router)
+app.include_router(topics.router)
+app.include_router(tags.router)
+app.include_router(cs_feeds.router)
+app.include_router(agent.router)
+app.include_router(content.router)
+app.include_router(pipelines.router)
+app.include_router(settings_router.router)
+app.include_router(jobs.router)
+app.include_router(auth.router)
+app.include_router(sensemaking.router)
+app.include_router(llm_configs.router)
