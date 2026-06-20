@@ -1,4 +1,4 @@
-"""LLM 配置 / 邮箱配置 / 每日报告配置路由
+"""LLM 配置 / 邮箱配置路由
 @author ScholarMind Team
 """
 
@@ -43,19 +43,6 @@ class EmailConfigUpdate(BaseModel):
     sender_name: str | None = None
     username: str | None = None
     password: str | None = None
-
-
-class DailyReportConfigUpdate(BaseModel):
-    """每日报告配置更新请求"""
-
-    enabled: bool | None = None
-    auto_deep_read: bool | None = None
-    deep_read_limit: int | None = None
-    send_email_report: bool | None = None
-    recipient_emails: str | None = None
-    cron_expression: str | None = None  # 新增：cron 表达式配置
-    include_paper_details: bool | None = None
-    include_graph_insights: bool | None = None
 
 
 class AIBackendConfigUpdate(BaseModel):
@@ -304,27 +291,6 @@ async def test_email_config(config_id: str):
                 raise HTTPException(status_code=500, detail="测试邮件发送失败")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"测试邮件发送失败: {str(e)}")
-
-
-# ---------- 每日报告配置 ----------
-
-
-@router.get("/settings/daily-report-config")
-def get_daily_report_config():
-    """获取每日报告配置"""
-    from packages.ai.auto_read_service import AutoReadService
-
-    return AutoReadService().get_config()
-
-
-@router.put("/settings/daily-report-config")
-def update_daily_report_config(body: DailyReportConfigUpdate):
-    """更新每日报告配置"""
-    from packages.ai.auto_read_service import AutoReadService
-
-    update_data = {k: v for k, v in body.model_dump().items() if v is not None}
-    config = AutoReadService().update_config(**update_data)
-    return {"message": "每日报告配置已更新", "config": config}
 
 
 # ---------- SMTP 配置预设 ----------

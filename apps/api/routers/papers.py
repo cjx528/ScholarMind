@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 
 from apps.api.deps import cache, paper_list_response, rag_service
+from packages.config import get_settings
 from packages.domain.schemas import AIExplainReq, PaperAskRequest, PaperAskResponse
 from packages.storage.models import AnalysisReport
 from packages.storage.db import session_scope
@@ -30,6 +31,32 @@ def _get_http_client() -> httpx.AsyncClient:
 
 
 router = APIRouter()
+
+
+def _remove_local_pdf(pdf_path: str | None) -> tuple[bool, str | None]:
+    if not pdf_path:
+        return False, None
+    try:
+        root = get_settings().pdf_storage_root.expanduser()
+        if not root.is_absolute():
+            root = Path.cwd() / root
+        root = root.resolve()
+
+        target = Path(pdf_path).expanduser()
+        if not target.is_absolute():
+            target = Path.cwd() / target
+        target = target.resolve()
+
+        if target != root and root not in target.parents:
+            return False, "PDF path is outside PDF_STORAGE_ROOT"
+        if not target.exists():
+            return False, None
+        if not target.is_file():
+            return False, "PDF path is not a file"
+        target.unlink()
+        return True, None
+    except OSError as exc:
+        return False, str(exc)
 
 
 @router.get("/papers/folder-stats")
@@ -309,6 +336,27 @@ def paper_detail(paper_id: UUID) -> dict:
             "skim_report": skim_data,
             "deep_report": deep_data,
         }
+
+
+@router.delete("/papers/{paper_id}")
+def delete_paper(paper_id: UUID) -> dict:
+    with session_scope() as session:
+        repo = PaperRepository(session)
+        try:
+            deleted = repo.delete_paper(paper_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    pdf_removed, pdf_error = _remove_local_pdf(deleted.get("pdf_path"))
+    cache.invalidate("folder_stats")
+    return {
+        "deleted": deleted["id"],
+        "title": deleted["title"],
+        "arxiv_id": deleted["arxiv_id"],
+        "pdf_removed": pdf_removed,
+        "pdf_cleanup_error": pdf_error,
+        "related": deleted.get("related", {}),
+    }
 
 
 @router.patch("/papers/{paper_id}/favorite")

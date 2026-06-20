@@ -3,7 +3,7 @@
  * @author ScholarMind Team
  */
 import { lazy, Suspense, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ToastProvider } from "@/contexts/ToastContext";
@@ -22,7 +22,6 @@ const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Papers = lazy(() => import("@/pages/Papers"));
 const PaperDetail = lazy(() => import("@/pages/PaperDetail"));
 const Wiki = lazy(() => import("@/pages/Wiki"));
-const DailyBrief = lazy(() => import("@/pages/DailyBrief"));
 const Statistics = lazy(() => import("@/pages/Statistics"));
 const Settings = lazy(() => import("@/pages/Settings"));
 
@@ -107,11 +106,9 @@ export default function App() {
           <Route path="/papers" element={<Suspense fallback={<PageFallback />}><Papers /></Suspense>} />
           <Route path="/papers/:id" element={<Suspense fallback={<PageFallback />}><PaperDetail /></Suspense>} />
           <Route path="/wiki" element={<Suspense fallback={<PageFallback />}><Wiki /></Suspense>} />
-          <Route path="/brief" element={<Suspense fallback={<PageFallback />}><DailyBrief /></Suspense>} />
           <Route path="/statistics" element={<Suspense fallback={<PageFallback />}><Statistics /></Suspense>} />
 
           {/* 常见拼写重定向 */}
-          <Route path="/briefs" element={<Navigate to="/brief" replace />} />
           <Route path="/settings" element={<Suspense fallback={<PageFallback />}><Settings /></Suspense>} />
 
           {/* 404 */}

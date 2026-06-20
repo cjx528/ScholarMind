@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from packages.ai.brief_service import DailyBriefService
 from packages.ai.graph_service import GraphService
 from packages.ai.pipelines import PaperPipelines
 from packages.ai.rag_service import RAGService
@@ -181,15 +180,15 @@ TOOL_REGISTRY: list[ToolDef] = [
                 "days_back": {
                     "type": "integer",
                     "description": (
-                        "只检索最近 N 天提交的论文（默认 0 = 不限日期，可搜到经典/老论文）。"
-                        "需要最新增量时传 7 或 30。"
+                        "只检索最近 N 天提交的论文。默认 180 天，优先新论文；"
+                        "需要经典/全时间段时显式传 0。"
                     ),
-                    "default": 0,
+                    "default": 180,
                 },
                 "sort_by": {
                     "type": "string",
-                    "description": "排序方式：relevance（相关性，默认）/ submittedDate（最新优先）",
-                    "default": "relevance",
+                    "description": "排序方式：submittedDate（默认，最新优先）/ relevance（相关性优先）",
+                    "default": "submittedDate",
                 },
             },
             "required": ["query"],
@@ -266,21 +265,6 @@ TOOL_REGISTRY: list[ToolDef] = [
                 },
             },
             "required": ["type", "keyword_or_id"],
-        },
-        requires_confirm=True,
-    ),
-    ToolDef(
-        name="generate_daily_brief",
-        description="生成并发布每日简报",
-        parameters={
-            "type": "object",
-            "properties": {
-                "recipient": {
-                    "type": "string",
-                    "description": "邮件接收人，空则仅保存不发送",
-                    "default": "",
-                },
-            },
         },
         requires_confirm=True,
     ),
@@ -374,7 +358,6 @@ def _get_tool_handlers() -> dict:
         "deep_read_paper": _deep_read_paper,
         "embed_paper": _embed_paper,
         "generate_wiki": _generate_wiki,
-        "generate_daily_brief": _generate_daily_brief,
         "manage_subscription": _manage_subscription,
         "suggest_keywords": _suggest_keywords,
         "reasoning_analysis": _reasoning_analysis,
@@ -691,13 +674,12 @@ def _get_system_status() -> ToolResult:
 def _search_arxiv(
     query: str,
     max_results: int = 20,
-    days_back: int = 0,
-    sort_by: str = "relevance",
+    days_back: int = 180,
+    sort_by: str = "submittedDate",
 ) -> ToolResult:
     """搜索 arXiv，返回候选论文列表（不入库）
 
-    days_back=0（默认）不限日期，适合按关键词检索经典/全时间段论文。
-    想要最新增量时传 days_back=7/30。
+    默认检索最近 180 天并按最新提交优先；需要经典/全时间段时传 days_back=0。
     """
     from packages.integrations.arxiv_client import ArxivClient
 
@@ -1243,66 +1225,6 @@ def _generate_wiki(type: str, keyword_or_id: str):
         success=True,
         data=result,
         summary=f"已生成 {type} wiki",
-    )
-
-
-def _generate_daily_brief(recipient: str = ""):
-    """简报生成 - generator，yield 进度和最终结果"""
-    from datetime import UTC, datetime
-
-    from packages.integrations.notifier import NotificationService
-    from packages.storage.repositories import GeneratedContentRepository
-
-    yield ToolProgress(message="正在收集今日论文数据...", current=1, total=4)
-    svc = DailyBriefService()
-
-    yield ToolProgress(message="正在生成简报内容...", current=2, total=4)
-    html_content = svc.build_html()
-    ts_label = datetime.now(UTC).strftime("%Y-%m-%d")
-    ts_file = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-
-    yield ToolProgress(message="正在保存简报...", current=3, total=4)
-    notifier = NotificationService()
-    saved_path = notifier.save_brief_html(f"daily_brief_{ts_file}.html", html_content)
-
-    email_sent = False
-    clean_recipient = recipient.strip() if recipient else ""
-    if clean_recipient:
-        yield ToolProgress(message="正在发送邮件...", current=4, total=4)
-        email_sent = notifier.send_email_html(
-            clean_recipient, "ScholarMind Daily Brief", html_content
-        )
-
-    db_saved = False
-    for attempt in range(3):
-        try:
-            with session_scope() as session:
-                repo = GeneratedContentRepository(session)
-                repo.create(
-                    content_type="daily_brief",
-                    title=f"Daily Brief: {ts_label}",
-                    markdown=html_content,
-                )
-            db_saved = True
-            break
-        except Exception as exc:
-            logger.warning("简报保存到数据库失败 (attempt %d): %s", attempt + 1, exc)
-            import time
-
-            time.sleep(1)
-
-    if not db_saved:
-        logger.error("简报保存到数据库最终失败，但文件已保存: %s", saved_path)
-
-    yield ToolResult(
-        success=True,
-        data={
-            "saved_path": saved_path,
-            "email_sent": email_sent,
-            "html": html_content,
-            "title": f"研究简报: {ts_label}",
-        },
-        summary="简报已生成" + ("并发送" if email_sent else ""),
     )
 
 

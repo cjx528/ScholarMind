@@ -458,22 +458,10 @@ export interface ReasoningAnalysisResponse {
   reasoning: ReasoningChainResult;
 }
 
-/* ========== 简报 ========== */
-export interface DailyBriefRequest {
-  date?: string;
-  recipient?: string;
-}
-
-export interface DailyBriefResponse {
-  task_id: string;
-  status: string;
-  message: string;
-}
-
 /* ========== 生成内容 ========== */
 export interface GeneratedContent {
   id: string;
-  content_type: "topic_wiki" | "paper_wiki" | "daily_brief";
+  content_type: "topic_wiki" | "paper_wiki" | "daily_radar";
   title: string;
   keyword?: string;
   paper_id?: string;
@@ -524,13 +512,63 @@ export interface IngestPaper {
   id: string;
   title: string;
   arxiv_id?: string;
+  source?: string | null;
   publication_date?: string | null;
+  status?: "new" | "existing" | "failed";
+  error?: string;
+  topic_id?: string | null;
+  topic_name?: string | null;
 }
 
 export interface IngestResult {
   ingested: number;
+  new_count?: number;
+  existing_count?: number;
   papers?: IngestPaper[];
+  failed?: IngestPaper[];
 }
+
+export interface ArxivPreviewCandidate {
+  id?: string;
+  source?: string;
+  source_id?: string | null;
+  doi?: string | null;
+  arxiv_id: string;
+  title: string;
+  abstract: string;
+  authors: string[];
+  categories: string[];
+  primary_category?: string | null;
+  publication_date?: string | null;
+  venue?: string | null;
+  exists: boolean;
+  match_score: number;
+  match_reasons: string[];
+  url?: string | null;
+  topic_id?: string | null;
+  topic_name?: string | null;
+  topic_confidence?: number;
+  topic_reason?: string;
+  sources?: { channel: string; [key: string]: unknown }[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface ArxivPreviewResponse {
+  query: string;
+  effective_query: string;
+  suggestions: string[];
+  notes: string[];
+  sort_by: string;
+  days_back?: number;
+  cs_only: boolean;
+  sources?: string[];
+  channel_stats?: Record<string, { total: number; new: number; duplicates: number; error?: string }>;
+  candidates: ArxivPreviewCandidate[];
+  total: number;
+  existing_count: number;
+}
+
+export type SearchPreviewCandidate = ArxivPreviewCandidate;
 
 /* ========== 多源搜索 ========== */
 export interface MultiSourcePaper {
@@ -644,6 +682,14 @@ export interface CompassAnalysisResult {
   keywords?: string[];
   categories?: string[];
   authors?: string[];
+}
+
+export interface CompassPaperAnalysisResponse {
+  analysis: CompassAnalysisResult | null;
+  profile_changed: boolean;
+  profile_hash_known: boolean;
+  current_profile_hash: string;
+  analysis_profile_hash?: string | null;
 }
 
 export interface CompassProfileResponse {
@@ -841,30 +887,23 @@ export interface EmailConfigForm {
   password: string;
 }
 
-/* ========== 每日报告配置 ========== */
-export interface DailyReportConfig {
-  enabled: boolean;
-  auto_deep_read: boolean;
-  deep_read_limit: number;
-  send_email_report: boolean;
-  recipient_emails: string[];
-  cron_expression: string;  // 新增：cron 表达式
-  report_time_utc: number;  // 保留：向后兼容
-  include_paper_details: boolean;
-  include_graph_insights: boolean;
-}
-
 /* ========== 后台任务 ========== */
 export interface TaskStatus {
   task_id: string;
   task_type: string;
   title: string;
-  status: "pending" | "running" | "completed" | "failed";
-  progress: number;
+  status?: "pending" | "running" | "completed" | "failed";
+  progress?: number;
+  progress_pct?: number;
+  current?: number;
+  total?: number;
   message: string;
   error: string | null;
   created_at: number;
-  updated_at: number;
+  updated_at?: number;
+  elapsed_seconds?: number;
+  finished?: boolean;
+  success?: boolean;
   has_result: boolean;
 }
 

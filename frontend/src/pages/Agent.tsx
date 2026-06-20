@@ -21,7 +21,6 @@ import {
   BookOpen,
   Brain,
   FileText,
-  Newspaper,
   ChevronDown,
   ChevronRight,
   Circle,
@@ -69,13 +68,6 @@ const ABILITIES: Ability[] = [
     prefix: "帮我生成一篇关于 ",
     placeholder: "输入 Wiki 主题...",
   },
-  {
-    icon: Newspaper,
-    label: "生成简报",
-    prefix: "帮我生成今日的研究简报",
-    placeholder: "",
-    direct: true,
-  },
 ];
 
 /* ========== 快捷建议（空状态卡片） ========== */
@@ -117,7 +109,6 @@ const SUGGESTIONS = [
     desc: "生成主题综述",
     prompt: "帮我生成一篇关于 Neural Radiance Fields 的 Wiki 综述",
   },
-  { icon: Newspaper, label: "生成简报", desc: "生成研究日报", prompt: "帮我生成今日的研究简报" },
 ];
 
 /* ========== 工具元数据 ========== */
@@ -136,7 +127,6 @@ const TOOL_META: Record<string, { icon: typeof Search; label: string }> = {
   deep_read_paper: { icon: BookOpen, label: "精读论文" },
   embed_paper: { icon: Brain, label: "向量嵌入" },
   generate_wiki: { icon: FileText, label: "生成 Wiki" },
-  generate_daily_brief: { icon: Newspaper, label: "生成简报" },
   manage_subscription: { icon: BookOpen, label: "订阅管理" },
 };
 
@@ -443,7 +433,7 @@ export default function Agent() {
           >
             {canvas.isHtml ? (
               <div
-                className="prose-custom brief-html-preview brief-content"
+                className="prose-custom artifact-html-preview artifact-content"
                 dangerouslySetInnerHTML={{ __html: canvas.markdown }}
               />
             ) : (
@@ -843,7 +833,7 @@ const ArtifactCard = memo(function ArtifactCard({
   const iconColor = isWiki ? "text-primary" : "text-amber-500";
   const borderColor = isWiki ? "border-primary/30" : "border-amber-400/30";
   const bgAccent = isWiki ? "bg-primary/5" : "bg-amber-50 dark:bg-amber-900/10";
-  const IconComp = isWiki ? FileText : Newspaper;
+  const IconComp = FileText;
 
   const preview = (
     isHtml
@@ -909,7 +899,7 @@ const ArtifactCard = memo(function ArtifactCard({
           >
             {isHtml ? (
               <div
-                className="prose-custom brief-html-preview brief-content text-sm"
+                className="prose-custom artifact-html-preview artifact-content text-sm"
                 dangerouslySetInnerHTML={{ __html: content }}
               />
             ) : (

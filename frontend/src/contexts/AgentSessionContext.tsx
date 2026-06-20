@@ -74,6 +74,10 @@ interface AgentSessionCtx {
 
 const Ctx = createContext<AgentSessionCtx | null>(null);
 
+function isAbortError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "name" in err && err.name === "AbortError";
+}
+
 /* ========== Provider ========== */
 
 export function AgentSessionProvider({ children }: { children: React.ReactNode }) {
@@ -116,6 +120,28 @@ export function AgentSessionProvider({ children }: { children: React.ReactNode }
     const text = streamBufRef.current;
     streamBufRef.current = "";
     return text;
+  }, []);
+
+  const markRunningStepsStopped = useCallback((snapshot: ChatItem[]): ChatItem[] => {
+    return snapshot.map((item) => {
+      if (item.type !== "step_group" || !item.steps?.some((step) => step.status === "running")) {
+        return item;
+      }
+      return {
+        ...item,
+        steps: item.steps.map((step) =>
+          step.status === "running"
+            ? {
+                ...step,
+                status: "error" as const,
+                success: false,
+                summary: "已停止",
+                progressMessage: "用户已停止",
+              }
+            : step
+        ),
+      };
+    });
   }, []);
 
   const flushStreamBuffer = useCallback(() => {
@@ -357,8 +383,8 @@ export function AgentSessionProvider({ children }: { children: React.ReactNode }
           if (data.success && data.data) {
             const d = data.data as Record<string, unknown>;
             if (d.html) {
-              // HTML 类 artifact（简报等）
-              const artTitle = String(d.title || "Daily Brief");
+              // HTML 类 artifact
+              const artTitle = String(d.title || "HTML Artifact");
               const artContent = String(d.html);
               setItems((prev) => [
                 ...prev,
@@ -573,6 +599,9 @@ export function AgentSessionProvider({ children }: { children: React.ReactNode }
     (reader: ReadableStreamDefaultReader<Uint8Array>, signal?: AbortSignal) => {
       parseSSEStream(reader, processSSE, () => {
         /* 兜底：仅在流异常关闭（未收到 done 事件）时清理状态 */
+        if (signal && abortRef.current?.signal === signal) {
+          abortRef.current = null;
+        }
         setLoading((current) => {
           if (!current) return false;
           const pending = drainBuffer();
@@ -669,7 +698,7 @@ export function AgentSessionProvider({ children }: { children: React.ReactNode }
         const ac = new AbortController();
         abortRef.current = ac;
         // 传递 conversationId 给后端
-        const resp = await agentApi.chat(msgs, convId);
+        const resp = await agentApi.chat(msgs, convId, undefined, ac.signal);
         if (!resp.body) {
           setItems((p) => [
             ...p,
@@ -685,6 +714,10 @@ export function AgentSessionProvider({ children }: { children: React.ReactNode }
         }
         startStream(resp.body.getReader(), ac.signal);
       } catch (err) {
+        if (isAbortError(err)) {
+          setLoading(false);
+          return;
+        }
         setItems((p) => [
           ...p,
           {
@@ -718,10 +751,14 @@ export function AgentSessionProvider({ children }: { children: React.ReactNode }
       try {
         const ac = new AbortController();
         abortRef.current = ac;
-        const resp = await agentApi.confirm(actionId);
+        const resp = await agentApi.confirm(actionId, ac.signal);
         if (resp.body) startStream(resp.body.getReader(), ac.signal);
         else setLoading(false);
       } catch (err) {
+        if (isAbortError(err)) {
+          setLoading(false);
+          return;
+        }
         setItems((p) => [
           ...p,
           {
@@ -750,13 +787,17 @@ export function AgentSessionProvider({ children }: { children: React.ReactNode }
       try {
         const ac = new AbortController();
         abortRef.current = ac;
-        const resp = await agentApi.reject(actionId);
+        const resp = await agentApi.reject(actionId, ac.signal);
         if (resp.body) {
           startStream(resp.body.getReader(), ac.signal);
         } else {
           setLoading(false);
         }
       } catch (err) {
+        if (isAbortError(err)) {
+          setLoading(false);
+          return;
+        }
         setItems((p) => [
           ...p,
           {
@@ -779,13 +820,15 @@ export function AgentSessionProvider({ children }: { children: React.ReactNode }
     const pending = drainBuffer();
     setLoading(false);
     setItems((prev) =>
-      prev.map((item) =>
-        item.type === "assistant" && item.streaming
-          ? { ...item, content: item.content + pending, streaming: false }
-          : item
+      markRunningStepsStopped(
+        prev.map((item) =>
+          item.type === "assistant" && item.streaming
+            ? { ...item, content: item.content + pending, streaming: false }
+            : item
+        )
       )
     );
-  }, [cancelStream, drainBuffer]);
+  }, [cancelStream, drainBuffer, markRunningStepsStopped]);
 
   const value: AgentSessionCtx = useMemo(
     () => ({

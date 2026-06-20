@@ -8,13 +8,14 @@ import {
   type ConversationMeta,
   type Conversation,
   type ConversationMessage,
+  type ConversationSeed,
 } from "@/hooks/useConversations";
 
 interface ConversationCtx {
   metas: ConversationMeta[];
   activeId: string | null;
   activeConv: Conversation | null;
-  createConversation: () => string;
+  createConversation: (seed?: ConversationSeed) => string;
   switchConversation: (id: string) => void;
   saveMessages: (messages: ConversationMessage[]) => void;
   deleteConversation: (id: string) => void;

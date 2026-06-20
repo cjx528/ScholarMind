@@ -1,11 +1,10 @@
-"""Wiki / 简报 / 生成内容 / 趋势路由
+"""Wiki / 生成内容 / 趋势路由
 @author ScholarMind Team
 """
 
 from fastapi import APIRouter, HTTPException, Query
 
-from apps.api.deps import brief_service, cache, graph_service, iso_dt
-from packages.domain.schemas import DailyBriefRequest
+from apps.api.deps import cache, graph_service, iso_dt
 from packages.domain.task_tracker import global_tracker
 from packages.storage.db import session_scope
 from packages.storage.repositories import GeneratedContentRepository
@@ -86,6 +85,31 @@ def _run_topic_wiki_task(
     return result
 
 
+def _run_paper_wiki_task(
+    paper_id: str,
+    progress_callback=None,
+) -> dict:
+    """后台执行 paper wiki 生成"""
+    if progress_callback:
+        progress_callback("正在为论文生成 Wiki...", 10, 100)
+    result = graph_service.paper_wiki(paper_id=paper_id)
+    if progress_callback:
+        progress_callback("正在保存 Wiki...", 90, 100)
+    with session_scope() as session:
+        repo = GeneratedContentRepository(session)
+        gc = repo.create(
+            content_type="paper_wiki",
+            title=f"Paper Wiki: {result.get('title', paper_id)}",
+            markdown=result.get("markdown", ""),
+            paper_id=paper_id,
+            metadata_json={k: v for k, v in result.items() if k != "markdown"},
+        )
+        result["content_id"] = gc.id
+    if progress_callback:
+        progress_callback("Wiki 生成完成", 100, 100)
+    return result
+
+
 @router.post("/tasks/wiki/topic")
 def start_topic_wiki_task(
     keyword: str,
@@ -103,12 +127,25 @@ def start_topic_wiki_task(
     return {"task_id": task_id, "status": "pending"}
 
 
+@router.post("/tasks/wiki/paper/{paper_id}")
+def start_paper_wiki_task(paper_id: str) -> dict:
+    """提交后台 paper wiki 生成任务"""
+    task_id = global_tracker.submit(
+        task_type="paper_wiki",
+        title=f"Paper Wiki: {paper_id[:8]}",
+        fn=_run_paper_wiki_task,
+        paper_id=paper_id,
+        category="generation",
+    )
+    return {"task_id": task_id, "status": "pending"}
+
+
 # ---------- 生成内容历史 ----------
 
 
 @router.get("/generated/list")
 def generated_list(
-    type: str = Query(..., description="content_type: topic_wiki|paper_wiki|daily_brief"),
+    type: str = Query(..., description="content_type: topic_wiki|paper_wiki|daily_radar"),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict:
     with session_scope() as session:
@@ -159,48 +196,6 @@ def generated_delete(content_id: str) -> dict:
             raise HTTPException(status_code=404, detail="Content not found")
         repo.delete(content_id)
     return {"deleted": content_id}
-
-
-# ---------- 简报 ----------
-
-
-@router.post("/brief/daily")
-def daily_brief(req: DailyBriefRequest) -> dict:
-    """生成每日简报（异步任务）"""
-    from packages.domain.task_tracker import global_tracker
-
-    # 如果没有指定收件人，从数据库读取配置
-    recipient = req.recipient
-    if not recipient:
-        from packages.storage.db import session_scope
-        from packages.storage.repositories import DailyReportConfigRepository
-
-        with session_scope() as session:
-            config = DailyReportConfigRepository(session).get_config()
-            if config.send_email_report and config.recipient_emails:
-                recipient = config.recipient_emails.split(",")[0]
-
-    def _generate_fn(progress_callback=None):
-        # publish() 内部已写入 generated_content 表，无需重复
-        if progress_callback:
-            progress_callback("正在生成每日简报...", 20, 100)
-        result = brief_service.publish(recipient=recipient)
-        if progress_callback:
-            progress_callback("简报生成完成", 95, 100)
-        return result
-
-    task_id = global_tracker.submit(
-        task_type="daily_brief",
-        title="📰 生成每日简报",
-        fn=_generate_fn,
-        total=100,
-        category="generation",
-    )
-    return {
-        "task_id": task_id,
-        "status": "started",
-        "message": "日报生成已启动，预计需要 1-3 分钟...",
-    }
 
 
 # ---------- 推荐 & 趋势 ----------

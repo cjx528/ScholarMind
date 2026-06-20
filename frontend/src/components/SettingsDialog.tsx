@@ -1,5 +1,5 @@
 /**
- * 设置弹窗 - LLM 配置 / 邮箱与报告 / Pipeline 运行 / 运维操作
+ * 设置弹窗 - LLM 配置 / 邮箱 / Pipeline 运行 / 运维操作
  * @author ScholarMind Team
  */
 import { useState, useEffect, useCallback, type ReactNode } from "react";
@@ -16,7 +16,6 @@ import {
   jobApi,
   systemApi,
   emailConfigApi,
-  dailyReportApi,
 } from "@/services/api";
 import { getErrorMessage } from "@/lib/errorHandler";
 import type {
@@ -44,11 +43,9 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  Activity,
   Play,
   Zap,
   Settings2,
-  Calendar,
   AlertTriangle,
   BookOpen,
   Mail,
@@ -59,7 +56,7 @@ type Tab = "llm" | "pipeline" | "ops" | "email";
 
 const TABS: { key: Tab; label: string; icon: typeof Cpu }[] = [
   { key: "llm", label: "LLM 配置", icon: Cpu },
-  { key: "email", label: "邮箱与报告", icon: Mail },
+  { key: "email", label: "邮箱", icon: Mail },
   { key: "pipeline", label: "Pipeline", icon: GitBranch },
   { key: "ops", label: "运维", icon: Settings },
 ];
@@ -779,12 +776,11 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
-/* ======== 邮箱与报告 Tab ======== */
+/* ======== 邮箱 Tab ======== */
 
 function EmailTab() {
   const { toast } = useToast();
   const [emailConfigs, setEmailConfigs] = useState<any[]>([]);
-  const [dailyReportConfig, setDailyReportConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showAddEmail, setShowAddEmail] = useState(false);
   const [editEmailConfig, setEditEmailConfig] = useState<any>(null);
@@ -800,21 +796,11 @@ function EmailTab() {
     }
   }, [toast]);
 
-  const loadDailyReportConfig = useCallback(async () => {
-    try {
-      const data = await dailyReportApi.getConfig();
-      setDailyReportConfig(data);
-      setLocalConfig(data);
-    } catch (err) {
-      toast("error", getErrorMessage(err));
-    }
-  }, [toast]);
-
   useEffect(() => {
-    Promise.all([loadEmailConfigs(), loadDailyReportConfig()]).finally(() => {
+    loadEmailConfigs().finally(() => {
       setLoading(false);
     });
-  }, [loadEmailConfigs, loadDailyReportConfig]);
+  }, [loadEmailConfigs]);
 
   const handleActivateEmail = async (id: string) => {
     setSubmitting(true);
@@ -849,64 +835,6 @@ function EmailTab() {
       toast("error", getErrorMessage(err));
     } finally {
       setTestEmailId(null);
-    }
-  };
-
-  const handleUpdateDailyReport = async (updates: any) => {
-    setSubmitting(true);
-    try {
-      const body: Record<string, unknown> = { ...updates };
-      if (updates.recipient_emails !== undefined) {
-        body.recipient_emails = Array.isArray(updates.recipient_emails)
-          ? updates.recipient_emails.join(",")
-          : updates.recipient_emails;
-      }
-      const data = await dailyReportApi.updateConfig(body);
-      if (data.config) {
-        setDailyReportConfig(data.config);
-        setLocalConfig(data.config);
-        toast("success", "每日报告配置已更新");
-      }
-    } catch (err) {
-      toast("error", getErrorMessage(err));
-      await loadDailyReportConfig();
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // 本地临时存储的配置值
-  const [localConfig, setLocalConfig] = useState<any>(null);
-
-  // 初始化本地配置
-  useEffect(() => {
-    if (dailyReportConfig) {
-      setLocalConfig(dailyReportConfig);
-    }
-  }, [dailyReportConfig]);
-
-  // 处理输入变化（只更新本地state，不调用API）
-  const handleInputChange = (field: string, value: any) => {
-    setLocalConfig((prev: any) => ({ ...prev, [field]: value }));
-  };
-
-  // 处理失去焦点（提交更新）
-  const handleInputBlur = (field: string) => {
-    if (localConfig && localConfig[field] !== dailyReportConfig[field]) {
-      handleUpdateDailyReport({ [field]: localConfig[field] });
-    }
-  };
-
-  const handleRunDailyWorkflow = async () => {
-    if (!confirm("确定要立即执行每日工作流吗？这将使用AI推荐系统找出高价值论文进行精读，生成每日简报并发送邮件报告。\n\n注意：精读论文需要几分钟时间，任务将在后台执行，请稍后查看结果。")) return;
-    setSubmitting(true);
-    try {
-      await dailyReportApi.runOnce();
-      toast("success", "每日报告工作流已启动，正在后台执行");
-    } catch (err) {
-      toast("error", getErrorMessage(err));
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -992,165 +920,6 @@ function EmailTab() {
         </Button>
       </div>
 
-      {/* 每日报告配置 */}
-      {dailyReportConfig && (
-        <div className="rounded-xl border border-border bg-surface p-4">
-          <h3 className="mb-3 text-sm font-semibold text-ink">每日报告配置</h3>
-          <div className="space-y-3">
-            {/* 总开关 */}
-            <div className="flex items-center justify-between rounded-lg border border-border bg-page px-3 py-2">
-              <div>
-                <p className="text-xs font-medium text-ink">启用每日报告</p>
-                <p className="text-[10px] text-ink-tertiary">自动精读论文并发送邮件报告</p>
-              </div>
-              <button
-                onClick={() => handleUpdateDailyReport({ enabled: !dailyReportConfig.enabled })}
-                disabled={submitting}
-                className={`relative h-5 w-9 rounded-full transition-colors ${
-                  dailyReportConfig.enabled ? "bg-primary" : "bg-ink-tertiary"
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-                    dailyReportConfig.enabled ? "translate-x-[1.125rem]" : "translate-x-0.5"
-                  }`}
-                />
-              </button>
-            </div>
-
-            {/* 详细配置 - 始终显示 */}
-            <>
-                {/* 自动精读 */}
-                <div className="rounded-lg border border-border bg-page px-3 py-2">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-medium text-ink">自动精读新论文</p>
-                    <button
-                      onClick={() => handleUpdateDailyReport({ auto_deep_read: !dailyReportConfig.auto_deep_read })}
-                      disabled={submitting}
-                      className={`relative h-4 w-8 rounded-full transition-colors ${
-                        dailyReportConfig.auto_deep_read ? "bg-primary" : "bg-ink-tertiary"
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${
-                          dailyReportConfig.auto_deep_read ? "translate-x-[1.125rem]" : "translate-x-0.5"
-                        }`}
-                      />
-                    </button>
-                  </div>
-                  {dailyReportConfig.auto_deep_read && (
-                    <div className="flex items-center gap-2">
-                      <label className="text-[10px] text-ink-secondary">每日精读数量限制</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={100}
-                        value={localConfig?.deep_read_limit ?? dailyReportConfig.deep_read_limit}
-                        onChange={(e) => handleInputChange("deep_read_limit", parseInt(e.target.value) || 10)}
-                        onBlur={() => handleInputBlur("deep_read_limit")}
-                        disabled={submitting}
-                        className="w-16 rounded border border-border bg-surface px-2 py-0.5 text-center text-xs text-ink"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* 邮件发送 */}
-                <div className="rounded-lg border border-border bg-page px-3 py-2">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-medium text-ink">发送邮件报告</p>
-                    <button
-                      onClick={() => handleUpdateDailyReport({ send_email_report: !dailyReportConfig.send_email_report })}
-                      disabled={submitting}
-                      className={`relative h-4 w-8 rounded-full transition-colors ${
-                        dailyReportConfig.send_email_report ? "bg-primary" : "bg-ink-tertiary"
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${
-                          dailyReportConfig.send_email_report ? "translate-x-[1.125rem]" : "translate-x-0.5"
-                        }`}
-                      />
-                    </button>
-                  </div>
-                  {dailyReportConfig.send_email_report && (
-                    <div className="space-y-2">
-                      <input
-                        type="text"
-                        placeholder="收件人邮箱（逗号分隔）"
-                        value={localConfig?.recipient_emails ?? dailyReportConfig.recipient_emails}
-                        onChange={(e) => handleInputChange("recipient_emails", e.target.value)}
-                        onBlur={() => handleInputBlur("recipient_emails")}
-                        disabled={submitting}
-                        className="w-full rounded border border-border bg-surface px-2 py-1.5 text-xs text-ink placeholder:text-ink-placeholder"
-                      />
-                      {/* Cron 表达式配置 */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-medium text-ink-secondary">定时任务 Cron 表达式</label>
-                        <input
-                          type="text"
-                          placeholder="0 4 * * *"
-                          value={localConfig?.cron_expression ?? dailyReportConfig.cron_expression ?? "0 4 * * *"}
-                          onChange={(e) => handleInputChange("cron_expression", e.target.value)}
-                          onBlur={() => handleInputBlur("cron_expression")}
-                          disabled={submitting}
-                          className="w-full rounded border border-border bg-surface px-2 py-1.5 text-xs font-mono text-ink placeholder:text-ink-placeholder"
-                        />
-                        <p className="text-[9px] text-ink-tertiary">
-                          默认：<code className="font-mono">0 4 * * *</code>（UTC 4 点 = 北京时间 12 点）
-                          <br />
-                          格式：<code className="font-mono">分 时 日 月 周</code>
-                        </p>
-                      </div>
-                      {/* 旧的 report_time_utc 保留但隐藏，向后兼容 */}
-                      <input type="hidden" value={localConfig?.report_time_utc ?? dailyReportConfig.report_time_utc} />
-                    </div>
-                  )}
-                </div>
-
-                {/* 报告内容 */}
-                <div className="rounded-lg border border-border bg-page px-3 py-2">
-                  <p className="mb-2 text-xs font-medium text-ink">报告内容</p>
-                  <div className="space-y-1">
-                    <label className="flex items-center gap-2 text-xs text-ink-secondary cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={dailyReportConfig.include_paper_details}
-                        onChange={(e) => handleUpdateDailyReport({ include_paper_details: e.target.checked })}
-                        disabled={submitting}
-                        className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-1 focus:ring-primary"
-                      />
-                      <span>包含论文详情</span>
-                    </label>
-                  </div>
-                </div>
-
-                {/* 立即执行 */}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleRunDailyWorkflow}
-                  disabled={submitting}
-                  className="w-full"
-                >
-                  {submitting ? (
-                    <>
-                      <Spinner className="mr-1.5 h-3.5 w-3.5" />
-                      执行中...
-                    </>
-                  ) : (
-                    <>
-                      <Play className="mr-1.5 h-3.5 w-3.5" />
-                      立即执行
-                    </>
-                  )}
-                </Button>
-            </>
-          </div>
-        </div>
-      )}
-
-      {/* 添加邮箱弹窗 */}
       {showAddEmail && (
         <AddEmailConfigInline
           onCreated={() => {
@@ -1414,29 +1183,6 @@ function OpsTab() {
           });
         } finally {
           setL("batchProcess", false);
-        }
-      },
-    },
-    {
-      key: "dailyJob",
-      label: "执行每日任务",
-      icon: Calendar,
-      desc: "抓取论文 + 生成简报",
-      action: async () => {
-        setL("dailyJob", true);
-        try {
-          await jobApi.dailyRun();
-          setR("dailyJob", {
-            success: true,
-            message: "每日任务执行完成",
-          });
-        } catch (err) {
-          setR("dailyJob", {
-            success: false,
-            message: err instanceof Error ? err.message : "失败",
-          });
-        } finally {
-          setL("dailyJob", false);
         }
       },
     },

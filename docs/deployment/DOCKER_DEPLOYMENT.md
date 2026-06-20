@@ -67,7 +67,6 @@ Invoke-WebRequest http://127.0.0.1:8002/health
 
 `docker-compose.yml` 默认使用：
 
-- `scholarmind_data`：数据库、PDF、简报输出。
 - `scholarmind_logs`：后端和 worker 日志。
 
 如需备份数据卷，请先停止服务：
@@ -101,5 +100,3 @@ docker compose down
 ```powershell
 docker compose down --remove-orphans
 ```
-
-不要随意删除数据卷，除非已经确认不需要本地论文库和简报数据。

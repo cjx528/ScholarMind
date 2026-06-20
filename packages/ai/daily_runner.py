@@ -10,7 +10,6 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID
 
-from packages.ai.brief_service import DailyBriefService
 from packages.ai.pipelines import PaperPipelines
 from packages.ai.rate_limiter import acquire_api
 from packages.config import get_settings
@@ -386,24 +385,6 @@ def run_daily_ingest() -> dict:
         "processed": total_processed,
         "topics": results,
     }
-
-
-def run_daily_brief() -> dict:
-    """生成每日简报，从数据库读取收件人配置"""
-    # 从数据库读取收件人
-    from packages.storage.db import session_scope
-    from packages.storage.repositories import DailyReportConfigRepository
-
-    recipient = None
-    try:
-        with session_scope() as session:
-            config = DailyReportConfigRepository(session).get_config()
-            if config.send_email_report and config.recipient_emails:
-                recipient = config.recipient_emails.split(",")[0]
-    except Exception as e:
-        logger.warning(f"读取收件人配置失败：{e}")
-
-    return DailyBriefService().publish(recipient=recipient)
 
 
 # ========== 完整版新增：多渠道调度支持 ==========

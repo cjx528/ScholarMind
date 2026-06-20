@@ -330,8 +330,6 @@ def run_migrations() -> None:
     with engine.connect() as conn:
         topic_cols_before = _column_names(conn, "topic_subscriptions")
         llm_cols_before = _column_names(conn, "llm_provider_configs")
-        daily_cols_before = _column_names(conn, "daily_report_configs")
-
         _migrate_legacy_email_configs(conn)
         _migrate_legacy_cs_categories(conn)
         _migrate_legacy_agent_pending_actions(conn)
@@ -380,31 +378,6 @@ def run_migrations() -> None:
         except Exception:
             conn.rollback()
 
-        _safe_add_column(conn, "daily_report_configs", "auto_deep_read", "BOOLEAN", "1")
-        _safe_add_column(conn, "daily_report_configs", "deep_read_limit", "INTEGER", "10")
-        _safe_add_column(conn, "daily_report_configs", "send_email_report", "BOOLEAN", "1")
-        _safe_add_column(conn, "daily_report_configs", "recipient_emails", "VARCHAR(2048)", "''")
-        _safe_add_column(conn, "daily_report_configs", "report_time_utc", "INTEGER", "21")
-        _safe_add_column(conn, "daily_report_configs", "include_paper_details", "BOOLEAN", "1")
-        _safe_add_column(conn, "daily_report_configs", "include_graph_insights", "BOOLEAN", "0")
-        try:
-            if "send_time_utc" in daily_cols_before and "report_time_utc" not in daily_cols_before:
-                conn.execute(
-                    text(
-                        "UPDATE daily_report_configs "
-                        "SET report_time_utc = COALESCE(send_time_utc, report_time_utc)"
-                    )
-                )
-            if "include_deep_read" in daily_cols_before and "auto_deep_read" not in daily_cols_before:
-                conn.execute(
-                    text(
-                        "UPDATE daily_report_configs "
-                        "SET auto_deep_read = COALESCE(include_deep_read, auto_deep_read)"
-                    )
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
         _safe_add_nullable_column(conn, "prompt_traces", "input_cost_usd", "FLOAT")
         _safe_add_nullable_column(conn, "prompt_traces", "output_cost_usd", "FLOAT")
         _safe_add_nullable_column(conn, "prompt_traces", "total_cost_usd", "FLOAT")

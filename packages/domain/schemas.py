@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -75,11 +75,6 @@ class PaperAskResponse(BaseModel):
     answer: str
     used_context: list[str] = Field(default_factory=list)
     confidence: float = 0.0
-
-
-class DailyBriefRequest(BaseModel):
-    date: datetime | None = None
-    recipient: str | None = None
 
 
 class TopicCreate(BaseModel):

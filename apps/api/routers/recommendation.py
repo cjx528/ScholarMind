@@ -98,6 +98,11 @@ def analyze(req: AnalyzeRequest) -> dict:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.get("/papers/{paper_id}/analysis")
+def paper_analysis(paper_id: str) -> dict:
+    return CompassService().latest_paper_analysis(paper_id=paper_id)
+
+
 @router.get("/queue")
 def queue(top_k: int = Query(default=20, ge=1, le=100)) -> dict:
     return CompassService().queue(top_k=top_k)

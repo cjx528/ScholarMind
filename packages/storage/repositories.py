@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Integer, Select, delete, func, select
+from sqlalchemy import Integer, Select, delete, func, select, update
 from sqlalchemy.orm import Session, defer
 
 from packages.domain.enums import ActionType, PipelineStatus, ReadStatus
@@ -27,9 +27,10 @@ from packages.storage.models import (
     AnalysisReport,
     Citation,
     CollectionAction,
+    CompassAnalysisResult,
+    CompassFeedback,
     CSCategory,
     CSFeedSubscription,
-    DailyReportConfig,
     EmailConfig,
     GeneratedContent,
     LLMProviderConfig,
@@ -39,6 +40,8 @@ from packages.storage.models import (
     PipelineRun,
     PromptTrace,
     SourceCheckpoint,
+    SchemaPaperInteraction,
+    SensemakingSession,
     Tag,
     TopicSubscription,
 )
@@ -663,6 +666,77 @@ class PaperRepository:
         if paper is None:
             raise ValueError(f"paper {paper_id} not found")
         return paper
+
+    def delete_paper(self, paper_id: UUID) -> dict:
+        pid = str(paper_id)
+        paper = self.session.get(Paper, pid)
+        if paper is None:
+            raise ValueError(f"paper {paper_id} not found")
+
+        action_ids = list(
+            self.session.execute(
+                select(ActionPaper.action_id).where(ActionPaper.paper_id == pid)
+            ).scalars()
+        )
+        info = {
+            "id": pid,
+            "title": paper.title,
+            "arxiv_id": paper.arxiv_id,
+            "pdf_path": paper.pdf_path,
+            "related": {},
+        }
+        related: dict[str, int] = info["related"]
+
+        def _delete_related(name: str, stmt) -> None:
+            result = self.session.execute(stmt)
+            related[name] = int(result.rowcount or 0)
+
+        def _clear_reference(name: str, model) -> None:
+            result = self.session.execute(
+                update(model).where(model.paper_id == pid).values(paper_id=None)
+            )
+            related[name] = int(result.rowcount or 0)
+
+        _delete_related("analysis_reports", delete(AnalysisReport).where(AnalysisReport.paper_id == pid))
+        _delete_related(
+            "citations",
+            delete(Citation).where(
+                (Citation.source_paper_id == pid) | (Citation.target_paper_id == pid)
+            ),
+        )
+        _delete_related("paper_topics", delete(PaperTopic).where(PaperTopic.paper_id == pid))
+        _delete_related("paper_tags", delete(PaperTag).where(PaperTag.paper_id == pid))
+        _delete_related("action_papers", delete(ActionPaper).where(ActionPaper.paper_id == pid))
+        _delete_related(
+            "sensemaking_sessions",
+            delete(SensemakingSession).where(SensemakingSession.paper_id == pid),
+        )
+        _delete_related(
+            "schema_paper_interactions",
+            delete(SchemaPaperInteraction).where(SchemaPaperInteraction.paper_id == pid),
+        )
+
+        for model_name, model in (
+            ("pipeline_runs", PipelineRun),
+            ("prompt_traces", PromptTrace),
+            ("generated_contents", GeneratedContent),
+            ("agent_pending_actions", AgentPendingAction),
+            ("compass_analysis_results", CompassAnalysisResult),
+            ("compass_feedback", CompassFeedback),
+        ):
+            _clear_reference(model_name, model)
+
+        for action_id in set(action_ids):
+            count = self.session.execute(
+                select(func.count()).select_from(ActionPaper).where(ActionPaper.action_id == action_id)
+            ).scalar()
+            action = self.session.get(CollectionAction, action_id)
+            if action:
+                action.paper_count = int(count or 0)
+
+        self.session.delete(paper)
+        self.session.flush()
+        return info
 
     def set_pdf_path(self, paper_id: UUID, pdf_path: str) -> None:
         paper = self.get_by_id(paper_id)
@@ -1807,35 +1881,6 @@ class AgentMessageRepository:
         result = self.session.execute(q)
         self.session.flush()
         return result.rowcount
-
-
-class DailyReportConfigRepository:
-    """每日报告配置仓储"""
-
-    def __init__(self, session: Session):
-        self.session = session
-
-    def get_config(self) -> DailyReportConfig:
-        """获取每日报告配置（单例）"""
-        config = self.session.execute(select(DailyReportConfig)).scalar_one_or_none()
-
-        if not config:
-            # 创建默认配置
-            config = DailyReportConfig()
-            self.session.add(config)
-            self.session.flush()
-
-        return config
-
-    def update_config(self, **kwargs) -> DailyReportConfig:
-        """更新每日报告配置"""
-        config = self.get_config()
-        for key, value in kwargs.items():
-            if hasattr(config, key):
-                setattr(config, key, value)
-        return config
-
-
 
 class AgentPendingActionRepository:
     """Agent 待确认操作持久化 Repository"""

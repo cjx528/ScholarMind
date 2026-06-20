@@ -19,9 +19,7 @@ import {
   RefreshCw,
   Play,
   BookOpen,
-  Activity,
   Zap,
-  Calendar,
   CheckCircle2,
   XCircle,
   Clock,
@@ -39,7 +37,6 @@ import {
   jobApi,
   systemApi,
   emailConfigApi,
-  dailyReportApi,
 } from "@/services/api";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { cn } from "@/lib/utils";
@@ -49,7 +46,7 @@ type SettingsTab = "llm" | "email" | "pipeline" | "ops";
 
 const NAV_ITEMS: { key: SettingsTab; label: string; icon: typeof Cpu }[] = [
   { key: "llm", label: "AI 配置", icon: Cpu },
-  { key: "email", label: "邮箱与报告", icon: Mail },
+  { key: "email", label: "邮箱", icon: Mail },
   { key: "pipeline", label: "Pipeline", icon: GitBranch },
   { key: "ops", label: "运维", icon: Settings },
 ];
@@ -554,8 +551,6 @@ function ConfigModal({ config, onClose, onSaved }: { config?: any; onClose: () =
 function EmailSettings() {
   const { toast } = useToast();
   const [emailConfigs, setEmailConfigs] = useState<any[]>([]);
-  const [dailyReport, setDailyReport] = useState<any>(null);
-  const [localConfig, setLocalConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showAddEmail, setShowAddEmail] = useState(false);
@@ -566,15 +561,7 @@ function EmailSettings() {
     try { setEmailConfigs(await emailConfigApi.list() || []); } catch { toast("error", "加载邮箱配置失败"); }
   }, [toast]);
 
-  const loadDaily = useCallback(async () => {
-    try {
-      const data = await dailyReportApi.getConfig();
-      setDailyReport(data);
-      setLocalConfig(data);
-    } catch { toast("error", "加载报告配置失败"); }
-  }, [toast]);
-
-  useEffect(() => { Promise.all([loadEmails(), loadDaily()]).finally(() => setLoading(false)); }, [loadEmails, loadDaily]);
+  useEffect(() => { loadEmails().finally(() => setLoading(false)); }, [loadEmails]);
 
   const handleActivateEmail = async (id: string) => {
     setSubmitting(true);
@@ -612,57 +599,13 @@ function EmailSettings() {
     }
   };
 
-  const handleUpdateDailyReport = async (updates: any) => {
-    setSubmitting(true);
-    try {
-      const body: Record<string, unknown> = { ...updates };
-      if (updates.recipient_emails !== undefined) {
-        body.recipient_emails = Array.isArray(updates.recipient_emails) ? updates.recipient_emails.join(",") : updates.recipient_emails;
-      }
-      const data = await dailyReportApi.updateConfig(body);
-      if (data.config) {
-        setDailyReport(data.config);
-        setLocalConfig(data.config);
-        toast("success", "每日报告配置已更新");
-      }
-    } catch (err) {
-      toast("error", getErrorMessage(err));
-      await loadDaily();
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleInputChange = (field: string, value: any) => {
-    setLocalConfig((prev: any) => ({ ...prev, [field]: value }));
-  };
-
-  const handleInputBlur = (field: string) => {
-    if (localConfig && localConfig[field] !== dailyReport[field]) {
-      handleUpdateDailyReport({ [field]: localConfig[field] });
-    }
-  };
-
-  const handleRunDailyWorkflow = async () => {
-    if (!confirm("确定要立即执行每日工作流吗？这将使用AI推荐系统找出高价值论文进行精读，生成每日简报并发送邮件报告。\n\n注意：精读论文需要几分钟时间，任务将在后台执行，请稍后查看结果。")) return;
-    setSubmitting(true);
-    try {
-      await dailyReportApi.runOnce();
-      toast("success", "每日报告工作流已启动，正在后台执行");
-    } catch (err) {
-      toast("error", getErrorMessage(err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>;
 
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-lg font-semibold text-ink">邮箱与报告</h2>
-        <p className="mt-1 text-sm text-ink-secondary">配置邮件发送和每日报告</p>
+        <h2 className="text-lg font-semibold text-ink">邮箱</h2>
+        <p className="mt-1 text-sm text-ink-secondary">配置邮件发送</p>
       </div>
 
       {/* 邮箱配置 */}
@@ -706,135 +649,6 @@ function EmailSettings() {
         )}
       </div>
 
-      {/* 每日报告 */}
-      {dailyReport && (
-        <div className="space-y-4">
-          <h3 className="text-sm font-medium text-ink">每日报告</h3>
-          <div className="rounded-xl border border-border bg-page p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                  <Activity className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="font-medium text-ink">每日报告</p>
-                  <p className="text-xs text-ink-secondary">{dailyReport.enabled ? "已启用" : "已禁用"}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleUpdateDailyReport({ enabled: !dailyReport.enabled })}
-                disabled={submitting}
-                className={cn("relative h-6 w-11 rounded-full transition-colors", dailyReport.enabled ? "bg-primary" : "bg-ink-tertiary")}
-              >
-                <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform", dailyReport.enabled ? "translate-x-6" : "translate-x-0.5")} />
-              </button>
-            </div>
-
-            {dailyReport.enabled && (
-              <>
-                <div className="space-y-2">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-medium text-ink">发送邮件报告</p>
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateDailyReport({ send_email_report: !dailyReport.send_email_report })}
-                      disabled={submitting}
-                      className={cn("relative h-4 w-8 rounded-full transition-colors", dailyReport.send_email_report ? "bg-primary" : "bg-ink-tertiary")}
-                    >
-                      <span className={cn("absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform", dailyReport.send_email_report ? "translate-x-[1.125rem]" : "translate-x-0.5")} />
-                    </button>
-                  </div>
-                  {dailyReport.send_email_report && (
-                    <div className="space-y-2">
-                      <input
-                        type="text"
-                        placeholder="收件人邮箱（逗号分隔）"
-                        value={localConfig?.recipient_emails ?? dailyReport.recipient_emails}
-                        onChange={(e) => handleInputChange("recipient_emails", e.target.value)}
-                        onBlur={() => handleInputBlur("recipient_emails")}
-                        disabled={submitting}
-                        className="w-full rounded border border-border bg-surface px-2 py-1.5 text-xs text-ink placeholder:text-ink-placeholder"
-                      />
-                      <div className="space-y-1">
-                        <label htmlFor="cron-expression" className="text-[10px] font-medium text-ink-secondary">定时任务 Cron 表达式</label>
-                        <input
-                          id="cron-expression"
-                          type="text"
-                          placeholder="0 4 * * *"
-                          value={localConfig?.cron_expression ?? dailyReport.cron_expression ?? "0 4 * * *"}
-                          onChange={(e) => handleInputChange("cron_expression", e.target.value)}
-                          onBlur={() => handleInputBlur("cron_expression")}
-                          disabled={submitting}
-                          className="w-full rounded border border-border bg-surface px-2 py-1.5 text-xs font-mono text-ink placeholder:text-ink-placeholder"
-                        />
-                        <p className="text-[9px] text-ink-tertiary">
-                          默认：<code className="font-mono">0 4 * * *</code>（UTC 4 点 = 北京时间 12 点）
-                          <br />
-                          格式：<code className="font-mono">分 时 日 月 周</code>
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2">
-                  <div>
-                    <p className="text-xs font-medium text-ink">自动精读新论文</p>
-                    <p className="text-[10px] text-ink-tertiary">每日自动精选高价值论文进行深度阅读</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateDailyReport({ auto_deep_read: !dailyReport.auto_deep_read })}
-                    disabled={submitting}
-                    className={cn("relative h-5 w-9 rounded-full transition-colors", dailyReport.auto_deep_read ? "bg-primary" : "bg-ink-tertiary")}
-                  >
-                    <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform", dailyReport.auto_deep_read ? "translate-x-5" : "translate-x-0.5")} />
-                  </button>
-                </div>
-                {dailyReport.auto_deep_read && (
-                  <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
-                    <span className="text-xs text-ink-secondary">每日精读上限</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      value={localConfig?.deep_read_limit ?? dailyReport.deep_read_limit ?? 10}
-                      onChange={(e) => handleInputChange("deep_read_limit", parseInt(e.target.value) || 10)}
-                      onBlur={() => handleInputBlur("deep_read_limit")}
-                      disabled={submitting}
-                      className="w-20 rounded border border-border bg-page px-2 py-1 text-xs text-ink outline-none focus:border-primary"
-                    />
-                    <span className="text-xs text-ink-tertiary">篇</span>
-                  </div>
-                )}
-
-                <div className="rounded-lg border border-border bg-surface px-3 py-2">
-                  <p className="mb-2 text-xs font-medium text-ink">报告内容</p>
-                  <div className="space-y-1">
-                    <label className="flex items-center gap-2 text-xs text-ink-secondary cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={dailyReport.include_paper_details}
-                        onChange={(e) => handleUpdateDailyReport({ include_paper_details: e.target.checked })}
-                        disabled={submitting}
-                        className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-1 focus:ring-primary"
-                      />
-                      <span>包含论文详情</span>
-                    </label>
-                  </div>
-                </div>
-
-                <Button variant="secondary" size="sm" onClick={handleRunDailyWorkflow} disabled={submitting} className="w-full">
-                  {submitting ? <><Spinner className="mr-1.5 h-3.5 w-3.5" />执行中...</> : <><Play className="mr-1.5 h-3.5 w-3.5" />立即执行</>}
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 添加邮箱弹窗 */}
       {showAddEmail && (
         <AddEmailConfigModal
           onCreated={() => { setShowAddEmail(false); loadEmails(); }}
@@ -1118,7 +932,6 @@ function OpsSettings() {
 
   const ops = [
     { key: "batchProcess", label: "一键嵌入 & 粗读未读论文", desc: "对所有未读论文执行向量嵌入 + AI 粗读（并行处理）", icon: BookOpen, action: async () => { setL("batchProcess", true); try { const r = await jobApi.batchProcessUnread(50); setR("batchProcess", { success: r.failed === 0, message: r.message }); } catch (err) { setR("batchProcess", { success: false, message: err instanceof Error ? err.message : "失败" }); } finally { setL("batchProcess", false); } } },
-    { key: "dailyJob", label: "执行每日任务", desc: "抓取论文 + 生成简报", icon: Calendar, action: async () => { setL("dailyJob", true); try { await jobApi.dailyRun(); setR("dailyJob", { success: true, message: "每日任务执行完成" }); } catch (err) { setR("dailyJob", { success: false, message: err instanceof Error ? err.message : "失败" }); } finally { setL("dailyJob", false); } } },
     { key: "health", label: "系统健康检查", desc: "数据库 + 统计信息", icon: Zap, action: async () => { setL("health", true); try { const r = await systemApi.status(); setR("health", { success: r.health.status === "ok", message: `${r.health.status === "ok" ? "正常" : "异常"} | ${r.counts.topics} 主题 | ${r.counts.papers_latest_200} 论文` }); } catch (err) { setR("health", { success: false, message: err instanceof Error ? err.message : "失败" }); } finally { setL("health", false); } } },
   ];
 

@@ -2,9 +2,9 @@
  * Wiki - Manus 风格结构化知识百科
  * @author ScholarMind Team
  */
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from "react";
 import { Card, CardHeader, Button, Tabs, Spinner, Empty } from "@/components/ui";
-import { wikiApi, generatedApi, tasksApi } from "@/services/api";
+import { generatedApi, tasksApi } from "@/services/api";
 import type {
   PaperWiki,
   TopicWiki,
@@ -47,25 +47,120 @@ const wikiTabs = [
   { id: "paper", label: "论文 Wiki" },
 ];
 
+type WikiTaskKind = "topic" | "paper";
+
+type ActiveWikiTask = {
+  taskId: string;
+  kind: WikiTaskKind;
+  contentType: "topic_wiki" | "paper_wiki";
+  keyword?: string;
+  paperId?: string;
+};
+
+type ActiveWikiTaskMap = Partial<Record<WikiTaskKind, ActiveWikiTask>>;
+
+type WikiTaskState = {
+  progress: number;
+  message: string;
+};
+
+const ACTIVE_WIKI_TASK_KEY = "scholarmind.activeWikiTask";
+const ACTIVE_WIKI_TASKS_KEY = "scholarmind.activeWikiTasks";
+
+function contentTypeForWikiKind(kind: WikiTaskKind): ActiveWikiTask["contentType"] {
+  return kind === "topic" ? "topic_wiki" : "paper_wiki";
+}
+
+function getTaskProgress(status: TaskStatus) {
+  if (typeof status.progress === "number") return Math.max(0, Math.min(1, status.progress));
+  if (typeof status.progress_pct === "number") return Math.max(0, Math.min(1, status.progress_pct / 100));
+  if (status.total && status.total > 0) return Math.max(0, Math.min(1, (status.current || 0) / status.total));
+  return 0;
+}
+
+function taskFinished(status: TaskStatus) {
+  return Boolean(status.finished) || status.status === "completed" || status.status === "failed";
+}
+
+function taskSucceeded(status: TaskStatus) {
+  if (typeof status.success === "boolean") return status.success;
+  return status.status === "completed";
+}
+
+function validateActiveWikiTask(task: Partial<ActiveWikiTask> | null | undefined): ActiveWikiTask | null {
+  if (!task?.taskId || (task.kind !== "topic" && task.kind !== "paper")) return null;
+  return {
+    taskId: task.taskId,
+    kind: task.kind,
+    contentType: task.contentType || contentTypeForWikiKind(task.kind),
+    keyword: task.keyword,
+    paperId: task.paperId,
+  };
+}
+
+function saveActiveWikiTasks(tasks: ActiveWikiTask[]) {
+  try {
+    localStorage.setItem(ACTIVE_WIKI_TASKS_KEY, JSON.stringify(tasks));
+    localStorage.removeItem(ACTIVE_WIKI_TASK_KEY);
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+function readActiveWikiTasks(): ActiveWikiTask[] {
+  try {
+    const multiRaw = localStorage.getItem(ACTIVE_WIKI_TASKS_KEY);
+    if (multiRaw) {
+      const parsed = JSON.parse(multiRaw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item) => validateActiveWikiTask(item as Partial<ActiveWikiTask>))
+          .filter((item): item is ActiveWikiTask => Boolean(item));
+      }
+    }
+
+    const raw = localStorage.getItem(ACTIVE_WIKI_TASK_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Partial<ActiveWikiTask>;
+    const task = validateActiveWikiTask(parsed);
+    return task ? [task] : [];
+  } catch {
+    return [];
+  }
+}
+
+function clearActiveWikiTasks() {
+  try {
+    localStorage.removeItem(ACTIVE_WIKI_TASKS_KEY);
+    localStorage.removeItem(ACTIVE_WIKI_TASK_KEY);
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
 export default function Wiki() {
   const [activeTab, setActiveTab] = useState("topic");
   const [keyword, setKeyword] = useState("");
   const [paperId, setPaperId] = useState("");
   const [topicWiki, setTopicWiki] = useState<TopicWiki | null>(null);
   const [paperWiki, setPaperWiki] = useState<PaperWiki | null>(null);
-  const [loading, setLoading] = useState(false);
 
   /* 后台任务状态 */
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [taskProgress, setTaskProgress] = useState(0);
-  const [taskMessage, setTaskMessage] = useState("");
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [activeWikiTasks, setActiveWikiTasks] = useState<ActiveWikiTaskMap>({});
+  const [taskStates, setTaskStates] = useState<Record<string, WikiTaskState>>({});
+  const pollTimerRefs = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const activeTabRef = useRef(activeTab);
 
   useEffect(() => {
     return () => {
-      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      Object.values(pollTimerRefs.current).forEach((timer) => clearTimeout(timer));
+      pollTimerRefs.current = {};
     };
   }, []);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
 
   /* 历史记录 */
   const [history, setHistory] = useState<GeneratedContentListItem[]>([]);
@@ -74,6 +169,13 @@ export default function Wiki() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const contentType = activeTab === "topic" ? "topic_wiki" : "paper_wiki";
+  const activeKind: WikiTaskKind = activeTab === "paper" ? "paper" : "topic";
+  const activeTaskForTab = activeWikiTasks[activeKind] ?? null;
+  const activeTaskList = useMemo(
+    () => Object.values(activeWikiTasks).filter((task): task is ActiveWikiTask => Boolean(task)),
+    [activeWikiTasks]
+  );
+  const loading = Boolean(activeTaskForTab);
 
   const loadHistory = useCallback(async (type: string) => {
     setHistoryLoading(true);
@@ -91,74 +193,183 @@ export default function Wiki() {
     loadHistory(contentType);
   }, [contentType, loadHistory]);
 
-  const pollTask = useCallback(
-    async (tid: string) => {
-      const poll = async (): Promise<void> => {
-        try {
-          const status: TaskStatus = await tasksApi.getStatus(tid);
-          // progress 是 0-1 的小数
-          setTaskProgress(status.progress || 0);
-          setTaskMessage(status.message || "处理中...");
+  const showGeneratedContent = useCallback((content: GeneratedContent) => {
+    setSelectedContent(content);
+    setTopicWiki(null);
+    setPaperWiki(null);
+    if (content.content_type === "topic_wiki") setActiveTab("topic");
+    if (content.content_type === "paper_wiki") setActiveTab("paper");
+  }, []);
 
-          if (status.status === "completed" || status.status === "failed") {
-            // 任务完成，加载 Wiki 内容
-            const result = await generatedApi.list(contentType, 1);
-            if (result.items && result.items.length > 0) {
-              const content = await generatedApi.detail(result.items[0].id);
-              setTopicWiki({
-                keyword: content.keyword || content.title,
-                markdown: content.markdown,
-                timeline: { events: [], insights: [] },
-                survey: { summary: "", sections: [] },
-                content_id: content.id,
-              } as unknown as TopicWiki);
-              setPaperWiki(null);
-            }
-            setLoading(false);
-            setTaskId(null);
-            pollTimerRef.current = null;
-            loadHistory(contentType);
-            return;
-          }
-          if (status.error) {
-            setLoading(false);
-            setTaskId(null);
-            pollTimerRef.current = null;
-            return;
-          }
-        } catch {
-          pollTimerRef.current = setTimeout(poll, 5000);
-        }
-        pollTimerRef.current = setTimeout(poll, 2000);
-      };
-      poll();
+  const loadTaskResultContent = useCallback(
+    async (task: ActiveWikiTask, display: boolean) => {
+      let contentId = "";
+      try {
+        const result = await tasksApi.getResult(task.taskId);
+        contentId = String(result.content_id || "");
+      } catch {
+        /* fallback to generated history below */
+      }
+
+      if (contentId) {
+        const content = await generatedApi.detail(contentId);
+        if (display) showGeneratedContent(content);
+        return;
+      }
+
+      const result = await generatedApi.list(task.contentType, 1);
+      if (result.items?.length) {
+        const content = await generatedApi.detail(result.items[0].id);
+        if (display) showGeneratedContent(content);
+      }
     },
-    [contentType, loadHistory]
+    [showGeneratedContent]
   );
 
+  const upsertActiveWikiTask = useCallback((task: ActiveWikiTask) => {
+    setActiveWikiTasks((prev) => {
+      const next = { ...prev, [task.kind]: task };
+      saveActiveWikiTasks(Object.values(next).filter((item): item is ActiveWikiTask => Boolean(item)));
+      return next;
+    });
+  }, []);
+
+  const removeActiveWikiTask = useCallback((task: ActiveWikiTask) => {
+    setActiveWikiTasks((prev) => {
+      const next = { ...prev };
+      if (next[task.kind]?.taskId === task.taskId) delete next[task.kind];
+      const remaining = Object.values(next).filter((item): item is ActiveWikiTask => Boolean(item));
+      if (remaining.length) saveActiveWikiTasks(remaining);
+      else clearActiveWikiTasks();
+      return next;
+    });
+  }, []);
+
+  const pollTask = useCallback(
+    (task: ActiveWikiTask) => {
+      if (pollTimerRefs.current[task.taskId]) clearTimeout(pollTimerRefs.current[task.taskId]);
+      upsertActiveWikiTask(task);
+      setTaskStates((prev) => ({
+        ...prev,
+        [task.taskId]: prev[task.taskId] || { progress: 0, message: "任务已提交，正在初始化..." },
+      }));
+
+      const poll = async (): Promise<void> => {
+        try {
+          const status: TaskStatus = await tasksApi.getStatus(task.taskId);
+          setTaskStates((prev) => ({
+            ...prev,
+            [task.taskId]: {
+              progress: getTaskProgress(status),
+              message: status.message || "处理中...",
+            },
+          }));
+
+          if (taskFinished(status)) {
+            if (taskSucceeded(status)) {
+              await loadTaskResultContent(task, activeTabRef.current === task.kind);
+            } else {
+              setTaskStates((prev) => ({
+                ...prev,
+                [task.taskId]: {
+                  progress: getTaskProgress(status),
+                  message: status.error || "Wiki 生成失败",
+                },
+              }));
+            }
+            removeActiveWikiTask(task);
+            delete pollTimerRefs.current[task.taskId];
+            loadHistory(task.contentType);
+            return;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          if (message.includes("404") || /not found/i.test(message)) {
+            removeActiveWikiTask(task);
+            delete pollTimerRefs.current[task.taskId];
+            loadHistory(task.contentType);
+            return;
+          }
+          pollTimerRefs.current[task.taskId] = setTimeout(poll, 5000);
+          return;
+        }
+        pollTimerRefs.current[task.taskId] = setTimeout(poll, 2000);
+      };
+      void poll();
+    },
+    [loadHistory, loadTaskResultContent, removeActiveWikiTask, upsertActiveWikiTask]
+  );
+
+  useEffect(() => {
+    const savedTasks = readActiveWikiTasks();
+    if (savedTasks.length) {
+      savedTasks.forEach((task) => pollTask(task));
+      return;
+    }
+
+    let cancelled = false;
+    tasksApi
+      .active()
+      .then((res) => {
+        if (cancelled) return;
+        const runningWikiTasks = res.tasks.filter(
+          (task) =>
+            !task.finished && (task.task_type === "topic_wiki" || task.task_type === "paper_wiki")
+        );
+        runningWikiTasks.forEach((runningWiki) => {
+          const kind: WikiTaskKind = runningWiki.task_type === "paper_wiki" ? "paper" : "topic";
+          pollTask({
+            taskId: runningWiki.task_id,
+            kind,
+            contentType: contentTypeForWikiKind(kind),
+          });
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [pollTask]);
+
   const handleQuery = async () => {
-    setLoading(true);
+    if (activeTaskForTab) return;
     setSelectedContent(null);
-    setTaskProgress(0);
-    setTaskMessage("");
     try {
       if (activeTab === "topic" && keyword.trim()) {
         // 后台任务模式
-        const { task_id } = await tasksApi.startTopicWiki(keyword);
-        setTaskId(task_id);
-        setTaskMessage("任务已提交，正在初始化...");
-        pollTask(task_id);
+        const cleanKeyword = keyword.trim();
+        const { task_id } = await tasksApi.startTopicWiki(cleanKeyword);
+        const task: ActiveWikiTask = {
+          taskId: task_id,
+          kind: "topic",
+          contentType: "topic_wiki",
+          keyword: cleanKeyword,
+        };
+        setTaskStates((prev) => ({
+          ...prev,
+          [task_id]: { progress: 0, message: "任务已提交，正在初始化..." },
+        }));
+        pollTask(task);
         return;
       } else if (activeTab === "paper" && paperId.trim()) {
-        const res = await wikiApi.paper(paperId);
-        setPaperWiki(res);
-        setTopicWiki(null);
+        const cleanPaperId = paperId.trim();
+        const { task_id } = await tasksApi.startPaperWiki(cleanPaperId);
+        const task: ActiveWikiTask = {
+          taskId: task_id,
+          kind: "paper",
+          contentType: "paper_wiki",
+          paperId: cleanPaperId,
+        };
+        setTaskStates((prev) => ({
+          ...prev,
+          [task_id]: { progress: 0, message: "任务已提交，正在初始化..." },
+        }));
+        pollTask(task);
+        return;
       }
       loadHistory(contentType);
     } catch {
       /* */
-    } finally {
-      if (activeTab !== "topic") setLoading(false);
     }
   };
 
@@ -262,43 +473,49 @@ export default function Wiki() {
         </div>
       </div>
 
-      {/* 生成中 — 深度研究风格进度面板 */}
-      {loading && (
-        <div className="mx-auto max-w-lg py-16">
-          <div className="border-border bg-card rounded-2xl border p-8 shadow-sm">
-            <div className="mb-6 flex items-center gap-3">
+      {/* 生成中 — 支持主题 Wiki 与论文 Wiki 并行 */}
+      {activeTaskList.length > 0 && (
+        <div className="mx-auto w-full max-w-2xl py-6">
+          <div className="border-border bg-card rounded-2xl border p-6 shadow-sm">
+            <div className="mb-4 flex items-center gap-3">
               <div className="relative">
-                <div className="border-primary/20 border-t-primary h-12 w-12 animate-spin rounded-full border-[3px]" />
-                <BookOpen className="text-primary absolute top-1/2 left-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2" />
+                <div className="border-primary/20 border-t-primary h-10 w-10 animate-spin rounded-full border-[3px]" />
+                <BookOpen className="text-primary absolute top-1/2 left-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2" />
               </div>
               <div>
-                <p className="text-ink text-sm font-semibold">
-                  {taskId ? "深度研究中..." : "正在生成..."}
-                </p>
+                <p className="text-ink text-sm font-semibold">Wiki 后台生成中</p>
                 <p className="text-ink-tertiary text-xs">
-                  {taskMessage || "收集论文数据、分析论文关系、AI 撰写文章"}
+                  主题 Wiki 和论文 Wiki 可以同时运行，完成后会写入对应历史记录
                 </p>
               </div>
             </div>
 
-            {/* 进度条 */}
-            {taskId && (
-              <div className="space-y-2">
-                <div className="text-ink-secondary flex items-center justify-between text-xs">
-                  <span>{taskMessage}</span>
-                  <span className="tabular-nums">{Math.round(taskProgress * 100)}%</span>
-                </div>
-                <div className="bg-primary/10 h-2 w-full overflow-hidden rounded-full">
-                  <div
-                    className="from-primary to-primary/70 h-full rounded-full bg-gradient-to-r transition-all duration-700 ease-out"
-                    style={{ width: `${Math.max(2, taskProgress * 100)}%` }}
-                  />
-                </div>
-                <p className="text-ink-tertiary text-[11px]">
-                  任务在后台运行，可以切换页面稍后回来查看
-                </p>
-              </div>
-            )}
+            <div className="space-y-3">
+              {activeTaskList.map((task) => {
+                const state = taskStates[task.taskId] || { progress: 0, message: "处理中..." };
+                const label = task.kind === "topic" ? "主题 Wiki" : "论文 Wiki";
+                const title = task.keyword || task.paperId || task.taskId;
+                return (
+                  <div key={task.taskId} className="rounded-xl border border-border bg-page p-3">
+                    <div className="text-ink-secondary flex items-center justify-between gap-3 text-xs">
+                      <span className="min-w-0 truncate">
+                        <span className="font-medium text-ink">{label}</span>
+                        <span className="mx-1 text-ink-tertiary">·</span>
+                        {title}
+                      </span>
+                      <span className="tabular-nums">{Math.round(state.progress * 100)}%</span>
+                    </div>
+                    <div className="bg-primary/10 mt-2 h-2 w-full overflow-hidden rounded-full">
+                      <div
+                        className="from-primary to-primary/70 h-full rounded-full bg-gradient-to-r transition-all duration-700 ease-out"
+                        style={{ width: `${Math.max(2, state.progress * 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-ink-tertiary mt-1 text-[11px]">{state.message}</p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -582,7 +799,7 @@ function TopicWikiView({
           <CardHeader title="推荐阅读" action={<BookMarked className="text-primary h-5 w-5" />} />
           <div className="space-y-3">
             {content.reading_list.map((item, i) => (
-              <ReadingListItem key={item.title || `reading-${i}`} item={item} index={i} />
+              <ReadingListItem key={item.title || `reading-${i}`} item={item} />
             ))}
           </div>
         </Card>
@@ -702,7 +919,7 @@ function PaperWikiView({
           <CardHeader title="推荐阅读" action={<BookMarked className="text-primary h-5 w-5" />} />
           <div className="space-y-3">
             {content.reading_suggestions.map((item, i) => (
-              <ReadingListItem key={item.title || `suggestion-${i}`} item={item} index={i} />
+              <ReadingListItem key={item.title || `suggestion-${i}`} item={item} />
             ))}
           </div>
         </Card>
@@ -759,8 +976,8 @@ function CitationContextsCard({ contexts }: { contexts: string[] }) {
 }
 
 function PdfExcerptsCard({ excerpts }: { excerpts: PdfExcerpt[] }) {
-  if (!excerpts?.length) return null;
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  if (!excerpts?.length) return null;
   return (
     <Card>
       <CardHeader
@@ -862,7 +1079,7 @@ function TimelineView({ entries }: { entries: TimelineEntry[] }) {
   );
 }
 
-function ReadingListItem({ item, index }: { item: WikiReadingItem; index: number }) {
+function ReadingListItem({ item }: { item: WikiReadingItem }) {
   return (
     <div className="border-border hover:border-primary/30 flex gap-3 rounded-lg border p-3 transition-colors">
       <div className="bg-primary/10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
@@ -898,8 +1115,6 @@ function MarkdownArticle({
 }) {
   /* 尝试从 metadata 解析 wiki_content */
   const wikiContent = metadata?.wiki_content as TopicWikiContent | PaperWikiContent | undefined;
-  const isTopicWiki = metadata?.keyword !== undefined;
-
   if (wikiContent && "overview" in wikiContent) {
     return (
       <TopicWikiView

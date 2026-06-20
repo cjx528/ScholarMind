@@ -13,7 +13,6 @@ import LogoIcon from "@/assets/logo-icon.svg?react";
 import {
   FileText,
   BookOpen,
-  Newspaper,
   Moon,
   Sun,
   Plus,
@@ -29,6 +28,7 @@ import {
   LogOut,
   Radar,
   Sparkles,
+  ClipboardCheck,
 } from "lucide-react";
 import { paperApi, clearAuth } from "@/services/api";
 
@@ -39,10 +39,23 @@ const TOOLS = [
   { to: "/collect", icon: Search, label: "论文收集", accent: true },
   { to: "/papers", icon: FileText, label: "论文库", accent: false },
   { to: "/wiki", icon: BookOpen, label: "Wiki", accent: false },
-  { to: "/brief", icon: Newspaper, label: "研究简报", accent: false },
   { to: "/dashboard", icon: LayoutDashboard, label: "看板", accent: false },
   { to: "/statistics", icon: BarChart3, label: "主题统计", accent: false },
 ];
+
+const D_PART_USER_PROMPT =
+  "我负责完成 ScholarMind 的 D 部分：Agent、Wiki、设置、看板、认证、全局任务。请带我逐项完成验收记录和报告素材整理。";
+
+const D_PART_ASSISTANT_GUIDE = `这是 ScholarMind D 部分专用工作对话。
+
+覆盖范围：
+- Agent 首页与对话流：提问、停止生成、失败重试、工具步骤、确认动作、论文卡片跳转。
+- Wiki：单篇论文 Wiki、主题 Wiki、异步进度、历史详情和删除。
+- 设置与运维：AI 后端、Codex CLI、LLM Provider、SMTP、健康检查。
+- 看板与统计：系统状态、今日摘要、成本分析、Pipeline 记录、主题统计。
+- 认证、侧边栏、明暗主题、全局任务条。
+
+建议你按页面逐项验收：先写“通过 / 失败 / 未测”，再补一条证据，比如页面路径、按钮行为、错误提示或截图编号。完成后可以让我把记录整理成报告 D 部分的说明段落。`;
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
@@ -100,6 +113,18 @@ export default function Sidebar() {
     setMobileOpen(false);
   }, [createConversation, location.pathname, navigate]);
 
+  const handleStartDPartChat = useCallback(() => {
+    createConversation({
+      title: "ScholarMind D 部分验收",
+      messages: [
+        { type: "user", content: D_PART_USER_PROMPT },
+        { type: "assistant", content: D_PART_ASSISTANT_GUIDE },
+      ],
+    });
+    if (location.pathname !== "/") navigate("/");
+    setMobileOpen(false);
+  }, [createConversation, location.pathname, navigate]);
+
   const handleSelectChat = useCallback((id: string) => {
     switchConversation(id);
     if (location.pathname !== "/") navigate("/");
@@ -151,6 +176,13 @@ export default function Sidebar() {
           >
             <Plus className="h-4 w-4" />
             新对话
+          </button>
+          <button
+            onClick={handleStartDPartChat}
+            className="mt-2 flex w-full items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm font-medium text-primary transition-all hover:border-primary/30 hover:bg-primary/10"
+          >
+            <ClipboardCheck className="h-4 w-4" />
+            D 部分对话
           </button>
         </div>
 

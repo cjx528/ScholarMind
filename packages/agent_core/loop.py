@@ -397,7 +397,6 @@ class ConfirmationMixin:
             "generate_wiki": lambda a: (
                 f"生成 {a.get('type', '?')} 类型 Wiki（{a.get('keyword_or_id', '?')}）"
             ),
-            "generate_daily_brief": lambda _: "生成每日研究简报",
             "manage_subscription": lambda a: (
                 f"{'启用' if a.get('enabled') else '关闭'}主题「{a.get('topic_name', '?')}」的定时搜集"
             ),

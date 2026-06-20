@@ -6,7 +6,6 @@
 - 前端：React、TypeScript、Vite。
 - AI 能力：统一通过 `packages/ai/backend_config.py` 和 `packages/integrations/llm_client.py` 调用不同 LLM Provider。
 - 论文源：arXiv、OpenReview、Semantic Scholar、OpenAlex、DBLP、bioRxiv。
-- 存储：默认使用本地 SQLite，PDF 和简报存储在 `data/` 下。
 
 ## 后端入口
 
@@ -47,7 +46,6 @@
 - `frontend/src/pages/Papers.tsx`
 - `frontend/src/pages/PaperDetail.tsx`
 - `frontend/src/pages/Wiki.tsx`
-- `frontend/src/pages/DailyBrief.tsx`
 - `frontend/src/pages/Statistics.tsx`
 - `frontend/src/pages/Settings.tsx`
 
@@ -143,17 +141,14 @@
 - `GET /wiki/paper/{paper_id}`：单篇论文 Wiki。
 - `GET /wiki/topic`：主题 Wiki。
 - `POST /tasks/wiki/topic`：异步生成主题 Wiki。
-- `POST /brief/daily`：生成每日研究简报。
 - `GET /generated/list`：查看生成内容。
 
 相关文件：
 
 - `frontend/src/pages/Wiki.tsx`
-- `frontend/src/pages/DailyBrief.tsx`
 - `apps/api/routers/content.py`
 - `packages/ai/rag_service.py`
 - `packages/ai/graph_service.py`
-- `packages/ai/brief_service.py`
 
 ## Agent 与系统能力
 
@@ -184,7 +179,6 @@
 - LLM 配置接口：`apps/api/routers/llm_configs.py`
 - 站点密码登录：`apps/api/routers/auth.py`
 - 邮件配置：`/settings/email-configs`
-- 简报配置：`/settings/daily-report-config`
 
 `.env` 中至少需要配置一个可用 LLM API Key。课程演示默认使用智谱配置，真实 Key 由项目维护者线下发放。
 

@@ -1,7 +1,4 @@
-"""
-邮箱发送服务 - 支持每日简报邮件发送
-@author ScholarMind Team
-"""
+"""Email sending service."""
 
 from __future__ import annotations
 
@@ -82,27 +79,6 @@ class EmailService:
             logger.error(f"邮件发送失败: {e}", exc_info=True)
             return False
 
-    def send_daily_report(
-        self,
-        to_emails: list[str],
-        report_html: str,
-        report_date: str,
-    ) -> bool:
-        """
-        发送每日简报邮件
-
-        Args:
-            to_emails: 收件人邮箱列表
-            report_html: 简报 HTML 内容
-            report_date: 报告日期
-
-        Returns:
-            是否发送成功
-        """
-        subject = f"📚 ScholarMind 每日简报 - {report_date}"
-        return self.send_email(to_emails, subject, report_html)
-
-
 def create_test_email(config: EmailConfig) -> bool:
     """
     发送测试邮件
@@ -123,7 +99,7 @@ def create_test_email(config: EmailConfig) -> bool:
         <style>
             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
             .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; text-align: center; }
+            .header { background: #2563eb; color: white; padding: 30px; border-radius: 10px; text-align: center; }
             .content { background: #f7f9fc; padding: 20px; border-radius: 10px; margin-top: 20px; }
             .footer { text-align: center; color: #888; font-size: 12px; margin-top: 20px; }
         </style>
@@ -131,22 +107,19 @@ def create_test_email(config: EmailConfig) -> bool:
     <body>
         <div class="container">
             <div class="header">
-                <h1>✅ 邮箱配置测试成功！</h1>
-                <p>ScholarMind 每日简报功能已就绪</p>
+                <h1>ScholarMind email test succeeded</h1>
+                <p>Your SMTP configuration is ready.</p>
             </div>
             <div class="content">
-                <p>恭喜！您的邮箱配置已成功设置。</p>
-                <p>从现在起，您将收到每日自动生成的论文研究简报，包括：</p>
+                <p>This message confirms that ScholarMind can send HTML email through the configured SMTP account.</p>
                 <ul>
-                    <li>📄 新搜集的论文列表</li>
-                    <li>🔍 自动精读的关键论文</li>
-                    <li>📊 研究趋势分析</li>
-                    <li>🎯 个性化推荐</li>
+                    <li>SMTP connection succeeded</li>
+                    <li>Authentication succeeded</li>
+                    <li>HTML email delivery was accepted by the server</li>
                 </ul>
-                <p>祝您研究顺利！</p>
             </div>
             <div class="footer">
-                <p>Powered by ScholarMind - 让 AI 帮你读论文</p>
+                <p>Powered by ScholarMind</p>
             </div>
         </div>
     </body>

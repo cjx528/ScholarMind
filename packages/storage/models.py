@@ -272,7 +272,7 @@ class AppSetting(Base):
 
 
 class GeneratedContent(Base):
-    """生成的内容（Wiki/报告/简报等）"""
+    """Generated Wiki and other reusable content."""
 
     __tablename__ = "generated_contents"
 
@@ -408,7 +408,7 @@ class ActionPaper(Base):
 
 
 class EmailConfig(Base):
-    """邮箱配置 - 用于发送每日简报"""
+    """Email configuration."""
 
     __tablename__ = "email_configs"
 
@@ -426,48 +426,6 @@ class EmailConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
-
-
-class DailyReportConfig(Base):
-    """每日报告配置 - 自动精读和邮件发送设置"""
-
-    __tablename__ = "daily_report_configs"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    auto_deep_read: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, doc="是否自动精读新搜集的论文"
-    )
-    deep_read_limit: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=10, doc="每日自动精读的论文数量限制"
-    )
-    send_email_report: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, doc="是否发送邮件报告"
-    )
-    recipient_emails: Mapped[str] = mapped_column(
-        String(2048), nullable=False, default="", doc="收件人邮箱列表，逗号分隔"
-    )
-    cron_expression: Mapped[str] = mapped_column(
-        String(64), nullable=False, default="0 4 * * *", doc="定时任务 cron 表达式（UTC 时间）"
-    )
-    report_time_utc: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=21,
-        doc="发送报告的时间（UTC，0-23）- 已废弃，使用 cron_expression",
-    )
-    include_paper_details: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, doc="报告中是否包含论文详情"
-    )
-    include_graph_insights: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, doc="报告中是否包含图谱洞察"
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
-    )
-
-
 
 class CSCategory(Base):
     """arXiv 计算机科学分类"""

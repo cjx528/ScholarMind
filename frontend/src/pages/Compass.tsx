@@ -46,6 +46,7 @@ type QuickProfile = {
   readingGoals: string[];
   modalityFocus: string[];
   riskLevel: string;
+  recencyPreference: string;
   extraNotes: string;
 };
 
@@ -85,6 +86,7 @@ const DEFAULT_QUICK_PROFILE: QuickProfile = {
   readingGoals: [],
   modalityFocus: [],
   riskLevel: "balanced",
+  recencyPreference: "recent",
   extraNotes: "",
 };
 
@@ -159,6 +161,12 @@ const RISK_OPTIONS = [
   { value: "frontier", label: "高风险新想法" },
 ];
 
+const RECENCY_OPTIONS = [
+  { value: "recent", label: "新论文优先", desc: "默认近 180 天，必要时再放宽" },
+  { value: "balanced", label: "新旧平衡", desc: "默认近 2 年，同时保留经典线索" },
+  { value: "classic", label: "经典也可", desc: "不限时间，但仍按近期性加分" },
+];
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "操作失败";
 }
@@ -192,6 +200,9 @@ function normalizeQuickProfile(value: unknown): QuickProfile {
     riskLevel: RISK_OPTIONS.some((item) => item.value === raw.riskLevel)
       ? String(raw.riskLevel)
       : DEFAULT_QUICK_PROFILE.riskLevel,
+    recencyPreference: RECENCY_OPTIONS.some((item) => item.value === raw.recencyPreference)
+      ? String(raw.recencyPreference)
+      : DEFAULT_QUICK_PROFILE.recencyPreference,
     extraNotes: String(raw.extraNotes || ""),
   };
 }
@@ -207,6 +218,10 @@ function summarizeQuickProfile(quickProfile: QuickProfile) {
     listLine("论文类型偏好", quickProfile.paperTypes),
     listLine("读论文目的", quickProfile.readingGoals),
     `探索风格：${RISK_OPTIONS.find((item) => item.value === quickProfile.riskLevel)?.label ?? "平衡"}`,
+    `论文新旧比例：${
+      RECENCY_OPTIONS.find((item) => item.value === quickProfile.recencyPreference)?.label ??
+      "新论文优先"
+    }`,
     quickProfile.extraNotes.trim() ? `补充说明：${quickProfile.extraNotes.trim()}` : "",
   ].filter(Boolean);
 
@@ -222,6 +237,11 @@ function quickProfileAnswers(quickProfile: QuickProfile) {
     {
       question: "偏好稳健可复现还是高风险新想法？",
       answer: RISK_OPTIONS.find((item) => item.value === quickProfile.riskLevel)?.label ?? "",
+    },
+    {
+      question: "推荐新论文和经典论文的比例？",
+      answer:
+        RECENCY_OPTIONS.find((item) => item.value === quickProfile.recencyPreference)?.label ?? "",
     },
     { question: "还有什么个性化补充？", answer: quickProfile.extraNotes.trim() },
   ];
@@ -509,6 +529,31 @@ export default function Compass() {
                       }`}
                     >
                       {option.label}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+              <fieldset className="rounded-lg border border-border bg-page p-3">
+                <legend className="px-1 text-xs font-semibold text-ink-secondary">论文新旧比例</legend>
+                <div className="mt-2 grid gap-2">
+                  {RECENCY_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() =>
+                        setQuickProfile((current) => ({
+                          ...current,
+                          recencyPreference: option.value,
+                        }))
+                      }
+                      className={`rounded-lg border px-3 py-2 text-left text-xs transition ${
+                        quickProfile.recencyPreference === option.value
+                          ? "border-primary bg-primary-light text-primary"
+                          : "border-border bg-surface text-ink-secondary hover:bg-hover"
+                      }`}
+                    >
+                      <span className="block font-semibold">{option.label}</span>
+                      <span className="mt-0.5 block text-[11px] opacity-80">{option.desc}</span>
                     </button>
                   ))}
                 </div>

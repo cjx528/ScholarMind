@@ -3,11 +3,10 @@
 """
 
 import logging
-import uuid as _uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
-from packages.ai.daily_runner import run_daily_brief, run_daily_ingest
+from packages.ai.daily_runner import run_daily_ingest
 from packages.domain.enums import ReadStatus
 from packages.domain.task_tracker import global_tracker
 from packages.storage.db import session_scope
@@ -20,18 +19,15 @@ router = APIRouter()
 
 @router.post("/jobs/daily/run-once")
 def run_daily_once() -> dict:
-    """每日任务（抓取+简报）- 后台执行"""
+    """每日任务（抓取）- 后台执行"""
 
     def _fn(progress_callback=None):
         if progress_callback:
             progress_callback("正在执行订阅收集...", 10, 100)
         ingest = run_daily_ingest()
-        if progress_callback:
-            progress_callback("正在生成每日简报...", 70, 100)
-        brief = run_daily_brief()
-        return {"ingest": ingest, "brief": brief}
+        return {"ingest": ingest}
 
-    task_id = global_tracker.submit("daily_job", "📅 每日任务执行", _fn, category="report")
+    task_id = global_tracker.submit("daily_job", "📅 每日收集任务执行", _fn, category="collection")
     return {"task_id": task_id, "message": "每日任务已启动", "status": "running"}
 
 
@@ -183,83 +179,3 @@ def get_action_papers(
                 for p in papers
             ],
         }
-
-
-# ---------- 每日报告任务 ----------
-
-
-@router.post("/jobs/daily-report/run-once")
-async def run_daily_report_once(background_tasks: BackgroundTasks):
-    """完整工作流（精读 + 生成 + 发邮件）— 后台执行"""
-    import asyncio
-
-    from packages.ai.auto_read_service import AutoReadService
-
-    def _run_workflow_bg():
-        task_id = f"daily_report_{_uuid.uuid4().hex[:8]}"
-        global_tracker.start(
-            task_id, "daily_report", "📊 每日报告工作流", total=100, category="report"
-        )
-
-        def _progress(msg: str, cur: int, tot: int):
-            global_tracker.update(task_id, cur, msg, total=100)
-
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(AutoReadService().run_daily_workflow(_progress))
-            if result.get("success"):
-                global_tracker.finish(task_id, success=True)
-            else:
-                global_tracker.finish(task_id, success=False, error=result.get("error", "未知错误"))
-        except Exception as e:
-            global_tracker.finish(task_id, success=False, error=str(e))
-            logger.error(f"每日报告工作流失败: {e}", exc_info=True)
-
-    background_tasks.add_task(_run_workflow_bg)
-    return {"message": "每日报告工作流已启动", "status": "running"}
-
-
-@router.post("/jobs/daily-report/send-only")
-async def run_daily_report_send_only(
-    background_tasks: BackgroundTasks,
-    recipient: str | None = Query(default=None, description="收件人邮箱（逗号分隔），不填则用配置"),
-):
-    """快速发送模式 — 跳过精读，直接生成简报并发邮件（优先使用缓存）"""
-    from packages.ai.auto_read_service import AutoReadService
-
-    def _run_send_only_bg():
-        task_id = f"report_send_{_uuid.uuid4().hex[:8]}"
-        global_tracker.start(
-            task_id, "report_send", "📧 快速发送简报", total=100, category="report"
-        )
-
-        def _progress(msg: str, cur: int, tot: int):
-            global_tracker.update(task_id, cur, msg, total=100)
-
-        try:
-            recipients = (
-                [e.strip() for e in recipient.split(",") if e.strip()] if recipient else None
-            )
-            result = AutoReadService().send_only(recipients, _progress)
-            if result.get("success"):
-                global_tracker.finish(task_id, success=True)
-            else:
-                global_tracker.finish(task_id, success=False, error=result.get("error", "未知错误"))
-        except Exception as e:
-            global_tracker.finish(task_id, success=False, error=str(e))
-            logger.error(f"快速发送失败: {e}", exc_info=True)
-
-    background_tasks.add_task(_run_send_only_bg)
-    return {"message": "快速发送已启动（跳过精读）", "status": "running"}
-
-
-@router.post("/jobs/daily-report/generate-only")
-def run_daily_report_generate_only(
-    use_cache: bool = Query(default=False, description="是否使用缓存"),
-):
-    """仅生成简报 HTML — 不发邮件、不精读（同步返回）"""
-    from packages.ai.auto_read_service import AutoReadService
-
-    html = AutoReadService().step_generate_html(use_cache=use_cache)
-    return {"html": html, "used_cache": use_cache}

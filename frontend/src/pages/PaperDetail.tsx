@@ -7,12 +7,14 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Card, CardHeader, Button, Badge, Empty } from "@/components/ui";
 import { Tabs } from "@/components/ui/Tabs";
 import { PaperDetailSkeleton } from "@/components/Skeleton";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 // 重型依赖懒加载，只在真正需要时加载
 const Markdown = lazy(() => import("@/components/Markdown"));
 const PdfReader = lazy(() => import("@/components/PdfReader"));
 import { useToast } from "@/contexts/ToastContext";
 import { compassApi, paperApi, pipelineApi, tagApi } from "@/services/api";
+import { truncate } from "@/lib/utils";
 import type {
   Paper,
   SkimReport,
@@ -55,6 +57,7 @@ import {
   Plus,
   MessageSquare,
   Send,
+  Trash2,
 } from "lucide-react";
 
 /* ================================================================
@@ -257,9 +260,11 @@ export default function PaperDetail() {
 
   const [reasoning, setReasoning] = useState<ReasoningChainResult | null>(null);
   const [profileAnalysis, setProfileAnalysis] = useState<CompassAnalysisResult | null>(null);
+  const [profileAnalysisStale, setProfileAnalysisStale] = useState(false);
   const [profileAnalyzing, setProfileAnalyzing] = useState(false);
 
   const [readerOpen, setReaderOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [reportTab, setReportTab] = useState("skim");
 
   /* 标签相关 */
@@ -285,15 +290,28 @@ export default function PaperDetail() {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
+    setProfileAnalysis(null);
+    setProfileAnalysisStale(false);
     Promise.all([
       paperApi.detail(id),
       tagApi.list().catch(() => ({ items: [] as TagType[] })),
+      compassApi.paperAnalysis(id).catch(() => ({
+        analysis: null,
+        profile_changed: false,
+        profile_hash_known: true,
+        current_profile_hash: "",
+        analysis_profile_hash: null,
+      })),
     ])
-      .then(([p, tagRes]) => {
+      .then(([p, tagRes, compassRes]) => {
         setPaper(p);
         setEmbedDone(p.has_embedding ?? false);
         if (p.skim_report) setSavedSkim(p.skim_report);
         if (p.deep_report) setSavedDeep(p.deep_report);
+        if (compassRes.analysis) {
+          setProfileAnalysis(compassRes.analysis);
+          setProfileAnalysisStale(compassRes.profile_changed);
+        }
         setAllTags(tagRes.items);
         const rc = p.metadata?.reasoning_chain as ReasoningChainResult | undefined;
         if (rc) setReasoning(rc);
@@ -305,6 +323,49 @@ export default function PaperDetail() {
       })
       .finally(() => setLoading(false));
   }, [id, toast]);
+
+  const buildProfileAnalysisInput = useCallback(
+    (deepText?: string) => {
+      if (!paper) return "";
+      const deepContext = deepText || savedDeep?.deep_dive_md || "";
+      return [
+        paper.title,
+        paper.abstract_zh || paper.abstract,
+        deepContext ? `已有精读摘要:\n${deepContext.slice(0, 2400)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    },
+    [paper, savedDeep]
+  );
+
+  const syncProfileAnalysis = useCallback(
+    async (
+      deepText?: string,
+      options: { silent?: boolean; keepTab?: boolean } = {}
+    ): Promise<boolean> => {
+      if (!id || !paper) return false;
+      setProfileAnalyzing(true);
+      if (!options.keepTab) setReportTab("profile");
+      try {
+        const res = await compassApi.analyze({
+          paper_id: id,
+          input: buildProfileAnalysisInput(deepText),
+          mode: "library",
+        });
+        setProfileAnalysis(res);
+        setProfileAnalysisStale(false);
+        if (!options.silent) toast("success", "画像解析完成");
+        return true;
+      } catch {
+        if (!options.silent) toast("error", "画像解析失败");
+        return false;
+      } finally {
+        setProfileAnalyzing(false);
+      }
+    },
+    [buildProfileAnalysisInput, id, paper, toast]
+  );
 
   const handleSkim = async () => {
     if (!id) return;
@@ -347,9 +408,22 @@ export default function PaperDetail() {
         const rc = updated.metadata?.reasoning_chain as ReasoningChainResult | undefined;
         if (rc) setReasoning(rc);
       } catch {}
+      const deepText = [
+        report.method_summary,
+        report.experiments_summary,
+        report.ablation_summary,
+        ...report.reviewer_risks,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      const profileOk = await syncProfileAnalysis(deepText, { silent: true, keepTab: true });
       toast(
-        reasoningOk ? "success" : "warning",
-        reasoningOk ? "精读完成，推理链已并入" : "精读完成，推理链生成失败"
+        reasoningOk && profileOk ? "success" : "warning",
+        reasoningOk && profileOk
+          ? "精读完成，画像解析已同步更新"
+          : profileOk
+            ? "精读完成，画像解析已同步更新；推理链生成失败"
+            : "精读完成；画像解析同步失败，可稍后手动更新"
       );
     } catch {
       toast("error", "精读失败");
@@ -437,6 +511,7 @@ export default function PaperDetail() {
         }
       }
 
+      let profileSynced = true;
       try {
         const updated = await paperApi.detail(id);
         setPaper(updated);
@@ -444,9 +519,18 @@ export default function PaperDetail() {
         if (updated.deep_report) setSavedDeep(updated.deep_report);
         const rc = updated.metadata?.reasoning_chain as ReasoningChainResult | undefined;
         if (rc) setReasoning(rc);
+        if (updated.deep_report?.deep_dive_md) {
+          profileSynced = await syncProfileAnalysis(updated.deep_report.deep_dive_md, {
+            silent: true,
+            keepTab: true,
+          });
+        }
       } catch {}
       setAutoStage("");
-      toast("success", "深度分析完成");
+      toast(
+        profileSynced ? "success" : "warning",
+        profileSynced ? "深度分析完成，画像解析已同步更新" : "深度分析完成；画像解析同步失败"
+      );
       setReportTab(paper.pdf_path ? "deep" : "skim");
     } finally {
       setAutoAnalyzing(false);
@@ -455,29 +539,7 @@ export default function PaperDetail() {
   };
 
   const handleProfileAnalysis = async () => {
-    if (!id || !paper) return;
-    setProfileAnalyzing(true);
-    setReportTab("profile");
-    try {
-      const input = [
-        paper.title,
-        paper.abstract_zh || paper.abstract,
-        savedDeep?.deep_dive_md ? `已有精读摘要:\n${savedDeep.deep_dive_md.slice(0, 2400)}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-      const res = await compassApi.analyze({
-        paper_id: id,
-        input,
-        mode: "library",
-      });
-      setProfileAnalysis(res);
-      toast("success", "画像解析完成");
-    } catch {
-      toast("error", "画像解析失败");
-    } finally {
-      setProfileAnalyzing(false);
-    }
+    await syncProfileAnalysis();
   };
 
   const handleToggleFavorite = useCallback(async () => {
@@ -491,6 +553,22 @@ export default function PaperDetail() {
       setPaper((prev) => (prev ? { ...prev, favorited: prevFavorited } : prev));
     }
   }, [id, paper, toast]);
+
+  const handleDeletePaper = useCallback(async () => {
+    if (!id) return;
+    try {
+      const res = await paperApi.delete(id);
+      toast(
+        res.pdf_cleanup_error ? "warning" : "success",
+        res.pdf_cleanup_error
+          ? `论文已删除，PDF 清理失败：${res.pdf_cleanup_error}`
+          : "论文已删除"
+      );
+      navigate("/papers", { replace: true });
+    } catch (err) {
+      toast("error", err instanceof Error ? err.message : "删除论文失败");
+    }
+  }, [id, navigate, toast]);
 
   /* 标签管理 */
   const handleToggleTag = useCallback(
@@ -620,18 +698,28 @@ export default function PaperDetail() {
         >
           <ArrowLeft className="h-4 w-4" /> 返回论文列表
         </button>
-        <button
-          onClick={handleToggleFavorite}
-          className="hover:bg-error/10 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors"
-          title={paper.favorited ? "取消收藏" : "收藏"}
-        >
-          <Heart
-            className={`h-5 w-5 transition-all ${paper.favorited ? "scale-110 fill-red-500 text-red-500" : "text-ink-tertiary"}`}
-          />
-          <span className={paper.favorited ? "text-red-500" : "text-ink-tertiary"}>
-            {paper.favorited ? "已收藏" : "收藏"}
-          </span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleToggleFavorite}
+            className="hover:bg-error/10 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors"
+            title={paper.favorited ? "取消收藏" : "收藏"}
+          >
+            <Heart
+              className={`h-5 w-5 transition-all ${paper.favorited ? "scale-110 fill-red-500 text-red-500" : "text-ink-tertiary"}`}
+            />
+            <span className={paper.favorited ? "text-red-500" : "text-ink-tertiary"}>
+              {paper.favorited ? "已收藏" : "收藏"}
+            </span>
+          </button>
+          <button
+            onClick={() => setDeleteOpen(true)}
+            className="text-ink-tertiary hover:bg-error/10 hover:text-error flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors"
+            title="删除论文"
+          >
+            <Trash2 className="h-4 w-4" />
+            <span>删除</span>
+          </button>
+        </div>
       </div>
 
       {/* 论文信息卡 */}
@@ -902,14 +990,14 @@ export default function PaperDetail() {
             </div>
             <div className="text-left">
               <p className="text-ink text-sm font-semibold">
-                {hasDeep ? "已精读" : "精读 (Deep Read)"}
+                {hasDeep ? "已精读" : "精读 + 画像"}
               </p>
               <p className="text-ink-tertiary text-xs">
                 {deepLoading
-                  ? "精读与推理链分析中..."
+                  ? "精读、推理链与画像解析中..."
                   : !paper.pdf_path
                     ? "无 PDF，需先下载"
-                    : "方法论 + 实验 + 推理链"}
+                    : "方法论 + 实验 + 推理链 + 画像"}
               </p>
             </div>
           </button>
@@ -919,17 +1007,23 @@ export default function PaperDetail() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={handleProfileAnalysis}
-            disabled={profileAnalyzing}
+            disabled={profileAnalyzing || (hasProfileAnalysis && !profileAnalysisStale)}
             className="border-border bg-surface text-ink-secondary hover:border-primary/30 hover:text-ink inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-all disabled:opacity-50"
           >
             {profileAnalyzing ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : hasProfileAnalysis ? (
+            ) : hasProfileAnalysis && !profileAnalysisStale ? (
               <Check className="text-success h-3.5 w-3.5" />
             ) : (
               <Target className="h-3.5 w-3.5" />
             )}
-            画像解析
+            {profileAnalyzing
+              ? "画像解析中"
+              : profileAnalysisStale
+                ? "更新画像解析"
+                : hasProfileAnalysis
+                  ? "已画像解析"
+                  : "画像解析"}
           </button>
           <button
             onClick={handleEmbed}
@@ -1194,11 +1288,18 @@ export default function PaperDetail() {
                   正在结合用户画像解析这篇论文...
                 </div>
               ) : profileAnalysis ? (
-                <ProfileAnalysisCard analysis={profileAnalysis} />
+                <div className="space-y-3">
+                  {profileAnalysisStale && (
+                    <div className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm">
+                      当前用户画像已变化。下方保留的是上一次画像解析结果，可点击“更新画像解析”重新生成。
+                    </div>
+                  )}
+                  <ProfileAnalysisCard analysis={profileAnalysis} />
+                </div>
               ) : (
                 <EmptyReport
                   icon={<Target className="h-8 w-8" />}
-                  label="点击「画像解析」按钮，按用户画像判断这篇论文是否值得精读"
+                  label="精读完成后会自动生成画像解析；画像变化后可在这里更新"
                 />
               )}
             </div>
@@ -1369,6 +1470,16 @@ export default function PaperDetail() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title="删除论文"
+        description={`将从论文库删除「${truncate(paper.title, 80)}」。相关分析、标签关联和本地 PDF 会一并清理。`}
+        confirmLabel="删除"
+        variant="danger"
+        onConfirm={handleDeletePaper}
+        onCancel={() => setDeleteOpen(false)}
+      />
     </div>
   );
 }

@@ -158,13 +158,12 @@
 - 粗读、精读、推理链之间的区别和衔接。
 - PDF 阅读助手如何解决阅读过程中的即时提问。
 
-## D：Agent、Wiki、研究简报、设置、看板、认证、全局任务
+## D：Agent、Wiki、设置、看板、认证、全局任务
 
 负责页面：
 
 - `/`
 - `/wiki`
-- `/brief`
 - `/settings`
 - `/dashboard`
 - `/statistics`
@@ -174,26 +173,22 @@
 
 - 登录保护开启后，未登录用户只能看到登录页。
 - 登录成功后进入系统，退出登录后刷新仍保持未登录状态。
-- 侧边栏工具入口都能跳转：用户画像、研究雷达、论文收集、论文库、Wiki、研究简报、看板、主题统计。
+- 侧边栏工具入口都能跳转：用户画像、研究雷达、论文收集、论文库、Wiki、看板、主题统计。
 - 侧边栏新建对话、切换历史会话、删除会话正常。
 - 明暗主题切换后刷新仍保持。
 - Agent 能发送问题并收到流式中文回复。
 - Agent 回复过程中停止生成有效。
 - Agent 失败后能重试或继续输入。
-- Agent 工具步骤能展示搜索调研、下载论文、知识问答、粗读、精读、生成 Wiki、生成简报等意图。
+- Agent 工具步骤能展示搜索调研、下载论文、知识问答、粗读、精读、生成 Wiki 等意图。
 - Agent 待确认动作的确认和拒绝都能完成状态流转。
 - Agent 返回论文结果卡片时能跳到论文详情。
 - Wiki 能生成单篇论文 Wiki。
 - Wiki 能按关键词生成主题 Wiki，并支持异步任务进度。
 - Wiki 历史记录能打开详情和删除。
-- 研究简报能手动生成，显示提交、生成中、完成或失败状态。
-- 简报历史列表能打开详情和删除。
 - 设置页能选择 AI 后端，配置 Codex CLI 路径和超时。
 - LLM Provider 能新增、编辑、激活、停用、删除。
 - Provider 列表不明文展示 API Key。
 - 邮件 SMTP 能新增、编辑、激活、测试和删除。
-- 日报配置能修改启停、邮件发送、收件人、Cron、自动精读、精读数量、是否包含论文详情。
-- 立即运行日报按钮能提交任务或给出明确错误。
 - 设置页健康检查能返回数据库、主题和论文统计。
 - 看板能展示系统状态、今日摘要、成本分析、Pipeline 运行记录和最近活动。
 - 看板中的成本标签和调用类型与当前功能一致。
@@ -206,7 +201,6 @@
 - `frontend/src/pages/AgentMessages.tsx`
 - `frontend/src/pages/AgentSteps.tsx`
 - `frontend/src/pages/Wiki.tsx`
-- `frontend/src/pages/DailyBrief.tsx`
 - `frontend/src/pages/Settings.tsx`
 - `frontend/src/pages/Dashboard.tsx`
 - `frontend/src/pages/Statistics.tsx`
@@ -221,13 +215,12 @@
 - `apps/api/routers/llm_configs.py`
 - `packages/ai/agent_service.py`
 - `packages/ai/agent_tools.py`
-- `packages/ai/brief_service.py`
 - `packages/ai/graph_service.py`
 
 建议报告内容：
 
 - Agent 如何把系统能力包装成自然语言入口。
-- Wiki 和简报如何把论文阅读结果沉淀成长期材料。
+- Wiki 如何把论文阅读结果沉淀成长期材料。
 - 设置、认证、看板、成本统计如何保证系统可运行和可维护。
 
 ## 公共验收要求

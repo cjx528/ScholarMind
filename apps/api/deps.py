@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from packages.ai.brief_service import DailyBriefService
 from packages.ai.graph_service import GraphService
 from packages.ai.pipelines import PaperPipelines
 from packages.ai.rag_service import RAGService
@@ -96,12 +95,6 @@ def iso_dt(dt: datetime | None) -> str | None:
     return dt.isoformat()
 
 
-def brief_date() -> str:
-    from packages.timezone import user_date_str
-
-    return user_date_str()
-
-
 def paper_list_response(papers: list, repo: PaperRepository) -> dict:
     """论文列表统一序列化"""
     paper_ids = [str(p.id) for p in papers]
@@ -141,5 +134,4 @@ def paper_list_response(papers: list, repo: PaperRepository) -> dict:
 
 pipelines = PaperPipelines()
 rag_service = RAGService()
-brief_service = DailyBriefService()
 graph_service = GraphService()

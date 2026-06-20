@@ -83,7 +83,7 @@ export default function SetupWizard({ onReady }: Props) {
             </button>
           </div>
           <p className="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
-            论文、数据库、简报等文件都会存储在此目录
+            论文、数据库等文件都会存储在此目录
           </p>
         </div>
 

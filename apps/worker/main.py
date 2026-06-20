@@ -17,10 +17,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from packages.ai.cs_feed_orchestrator import CSFeedOrchestrator
-from packages.ai.daily_runner import (
-    run_daily_brief,
-    run_topic_ingest,
-)
+from packages.ai.daily_runner import run_topic_ingest
 from packages.ai.idle_processor import start_idle_processor, stop_idle_processor
 from packages.config import get_settings
 from packages.logging_setup import setup_logging
@@ -125,31 +122,6 @@ def topic_dispatch_job() -> None:
     _write_heartbeat()
 
 
-def brief_job() -> None:
-    """
-    每日简报任务 - UTC 时间优化版
-
-    时间表（UTC）：
-    - 02:00 → 主题抓取论文
-    - 02:00-04:00 → 并行处理论文（粗读 + 嵌入 + 精选精读）
-    - 04:00 → 生成简报（包含所有处理完的论文）
-    - 04:30 → 发送邮件（北京时间 12:30，午饭时间）
-    """
-    logger.info("📮 开始生成每日简报...")
-    try:
-        result = _retry_with_backoff(
-            run_daily_brief, max_retries=_RETRY_MAX, base_delay=_RETRY_DELAY
-        )
-        logger.info(
-            "✅ 每日简报生成完成：saved=%s, email_sent=%s",
-            result.get("saved_path", "N/A") if result else "N/A",
-            result.get("email_sent", False) if result else False,
-        )
-    except Exception:
-        logger.exception("Daily brief job failed after retries")
-    _write_heartbeat()
-
-
 def cs_feed_dispatch_job():
     """每小时同步分类 + 执行订阅抓取"""
     cs_orchestrator.sync_categories()
@@ -166,14 +138,10 @@ def run_worker() -> None:
     ├─────────────────────────────────────────────────────────┤
     │ 主题论文抓取      │ 02:00 每小时  │ 10:00 每小时       │
     │ 论文处理缓冲      │ 02:00-04:00   │ 10:00-12:00        │
-    │ 每日简报生成      │ 04:00         │ 12:00              │
-    │ 简报邮件发送      │ 04:30         │ 12:30 (午饭时间)   │
     │ 闲时自动处理      │ 全天检测      │ 全天检测           │
     └─────────────────────────────────────────────────────────┘
     """
     scheduler = BlockingScheduler(timezone="UTC")
-
-    settings = get_settings()
 
     # 每整点检查主题调度（UTC 时间）
     scheduler.add_job(
@@ -192,30 +160,6 @@ def run_worker() -> None:
         replace_existing=True,
     )
     logger.info("✅ 已添加：CS分类订阅调度任务（每小时整点，UTC）")
-
-    # 每日简报（从数据库读取 cron 表达式）
-    from packages.storage.db import session_scope
-    from packages.storage.repositories import DailyReportConfigRepository
-
-    try:
-        with session_scope() as session:
-            config = DailyReportConfigRepository(session).get_config()
-            daily_cron = config.cron_expression or "0 4 * * *"
-    except Exception as e:
-        logger.warning(f"从数据库读取 cron 失败：{e}，使用默认值")
-        daily_cron = "0 4 * * *"
-
-    daily_trigger = CronTrigger.from_crontab(daily_cron)
-    scheduler.add_job(
-        brief_job,
-        trigger=daily_trigger,
-        id="daily_brief",
-        replace_existing=True,
-    )
-    logger.info(
-        "✅ 已添加：每日简报任务（cron: %s）",
-        daily_cron,
-    )
 
     # 优雅关闭
     def _graceful_stop(*_: object) -> None:
@@ -240,7 +184,6 @@ def run_worker() -> None:
     logger.info("=" * 60)
     logger.info("调度时间表（UTC → 北京时间）:")
     logger.info("  • 主题抓取：每小时整点 → 每小时整点")
-    logger.info("  • 每日简报：04:00 → 12:00")
     logger.info("  • 每周图谱：周日 22:00 → 周一 06:00")
     logger.info("  • 闲时处理：全天自动检测 → 全天自动检测")
     logger.info("=" * 60)

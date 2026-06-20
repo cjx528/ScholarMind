@@ -23,6 +23,7 @@ from packages.integrations.arxiv_client import ArxivClient
 from packages.integrations.llm_client import LLMClient
 from packages.storage.db import session_scope
 from packages.storage.models import (
+    CollectionAction,
     CompassAnalysisResult,
     CompassFeedback,
     CompassPreferenceModel,
@@ -219,6 +220,40 @@ def _profile_list(profile: dict[str, Any], key: str) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()] if isinstance(value, list) else []
 
 
+def _profile_recency_preference(profile: dict[str, Any]) -> str:
+    quick_profile = profile.get("quickProfile") if isinstance(profile.get("quickProfile"), dict) else {}
+    value = str(quick_profile.get("recencyPreference") or "").strip().lower()
+    if value in {"balanced", "balance", "mixed"}:
+        return "balanced"
+    if value in {"classic", "classics", "old", "all_time", "all-time"}:
+        return "classic"
+    return "recent"
+
+
+def _profile_recency_strategy(profile: dict[str, Any]) -> dict[str, Any]:
+    preference = _profile_recency_preference(profile)
+    if preference == "classic":
+        return {
+            "preference": preference,
+            "days_back": 0,
+            "sort_by": "relevance",
+            "label": "classic_ok",
+        }
+    if preference == "balanced":
+        return {
+            "preference": preference,
+            "days_back": 730,
+            "sort_by": "submittedDate",
+            "label": "balanced_recent",
+        }
+    return {
+        "preference": preference,
+        "days_back": 180,
+        "sort_by": "submittedDate",
+        "label": "recent_first",
+    }
+
+
 def _profile_signal_bundle(profile: dict[str, Any]) -> dict[str, Any]:
     positive_parts = [
         profile.get("interests", ""),
@@ -243,7 +278,33 @@ def _profile_signal_bundle(profile: dict[str, Any]) -> dict[str, Any]:
         "paper_types": _profile_list(profile, "paperTypes"),
         "reading_goals": _profile_list(profile, "readingGoals"),
         "risk_level": risk_level,
+        "recency_preference": _profile_recency_preference(profile),
     }
+
+
+def _profile_hash(profile: dict[str, Any]) -> str:
+    material = {
+        "interests": profile.get("interests") or "",
+        "researchDirections": profile.get("researchDirections") or "",
+        "readingGoal": profile.get("readingGoal") or "",
+        "quickProfile": profile.get("quickProfile") if isinstance(profile.get("quickProfile"), dict) else {},
+        "questions": profile.get("questions") if isinstance(profile.get("questions"), list) else [],
+        "notes": profile.get("notes") if isinstance(profile.get("notes"), list) else [],
+        "confidence": profile.get("confidence") or 0,
+    }
+    encoded = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+
+def _trace_profile_hash(trace: Any) -> str | None:
+    if not isinstance(trace, list):
+        return None
+    for item in trace:
+        text = str(item)
+        if text.startswith("Profile hash:"):
+            value = text.split(":", 1)[1].strip()
+            return value or None
+    return None
 
 
 _PROFILE_QUERY_EXPANSIONS = {
@@ -665,10 +726,41 @@ class CompassService:
             backend=selected_backend,
         )
         result["paper_id"] = paper_id
+        result["profile_hash"] = _profile_hash(profile)
         if material_trace:
             result["trace"] = [*material_trace, *result.get("trace", [])]
         saved = self._save_analysis(result, source_text, user_id)
         return saved
+
+    def latest_paper_analysis(self, paper_id: str, user_id: str = USER_ID) -> dict[str, Any]:
+        current_hash = _profile_hash(self.get_profile(user_id))
+        with session_scope() as session:
+            row = session.execute(
+                select(CompassAnalysisResult)
+                .where(
+                    CompassAnalysisResult.user_id == user_id,
+                    CompassAnalysisResult.paper_id == paper_id,
+                )
+                .order_by(CompassAnalysisResult.created_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return {
+                    "analysis": None,
+                    "profile_changed": False,
+                    "profile_hash_known": True,
+                    "current_profile_hash": current_hash,
+                    "analysis_profile_hash": None,
+                }
+            analysis = self._analysis_row_to_dict(row)
+        analysis_hash = _trace_profile_hash(analysis.get("trace"))
+        return {
+            "analysis": analysis,
+            "profile_changed": bool(analysis_hash and analysis_hash != current_hash),
+            "profile_hash_known": bool(analysis_hash),
+            "current_profile_hash": current_hash,
+            "analysis_profile_hash": analysis_hash,
+        }
 
     def queue(self, top_k: int = 20, user_id: str = USER_ID) -> dict[str, Any]:
         top_k = max(1, min(100, top_k))
@@ -822,6 +914,7 @@ class CompassService:
         profile = self.get_profile(user_id)
         model = self.get_model(user_id)
         profile_signals = _profile_signal_bundle(profile)
+        recency_strategy = _profile_recency_strategy(profile)
         queries = _profile_arxiv_queries(profile)
         top_k = max(1, min(30, int(top_k or 8)))
         max_results = max(top_k, min(50, int(max_results or 24)))
@@ -842,8 +935,8 @@ class CompassService:
                 papers = client.fetch_latest(
                     query=query,
                     max_results=max_results,
-                    sort_by="relevance",
-                    days_back=0,
+                    sort_by=recency_strategy["sort_by"],
+                    days_back=recency_strategy["days_back"],
                 )
             except Exception as exc:
                 logger.warning("Profile arXiv recommendation failed for %s: %s", query, exc)
@@ -904,6 +997,7 @@ class CompassService:
             "queries": queries,
             "errors": errors,
             "source": "arxiv",
+            "recency": recency_strategy,
         }
 
     def _apply_profile(self, row: CompassUserProfile, data: dict[str, Any]) -> None:
@@ -1099,6 +1193,10 @@ class CompassService:
         raw_input: str,
         user_id: str,
     ) -> dict[str, Any]:
+        trace = list(result.get("trace") or [])
+        profile_hash = _safe_text(result.get("profile_hash"))
+        if profile_hash and not any(str(item).startswith("Profile hash:") for item in trace):
+            trace.insert(0, f"Profile hash: {profile_hash}")
         with session_scope() as session:
             row = CompassAnalysisResult(
                 id=str(uuid4()),
@@ -1112,7 +1210,7 @@ class CompassService:
                 recommendation_json=result.get("recommendation") or {},
                 final_score=float(result.get("final_score") or 0),
                 analysis_blocks_json=result.get("analysis_blocks") or [],
-                trace_json=result.get("trace") or [],
+                trace_json=trace,
                 next_agent_prompt=result.get("next_agent_prompt") or "",
                 ai_backend=result.get("ai_backend") or "llm",
             )
@@ -1162,6 +1260,16 @@ class CompassService:
         if negative_overlap:
             profile_fit = clamp_score(profile_fit - min(34, negative_overlap * 12), profile_fit)
         freshness = self._freshness_score(paper.publication_date)
+        recency_preference = str(profile_signals.get("recency_preference") or "recent")
+        if paper.publication_date:
+            age_days = (datetime.now(UTC).date() - paper.publication_date).days
+            if recency_preference == "recent" and age_days > 730:
+                freshness = min(freshness, 30)
+                profile_fit = clamp_score(profile_fit - 12, profile_fit)
+            elif recency_preference == "balanced" and age_days > 1825:
+                freshness = min(freshness, 38)
+            elif recency_preference == "classic" and age_days > 730:
+                freshness = max(freshness, 55)
         citations = meta.get("citation_count") or meta.get("citations") or 0
         importance = clamp_score(min(100, 45 + (float(citations or 0) ** 0.5) * 8), 55)
         risk_level = str(profile_signals.get("risk_level") or "")
@@ -1314,6 +1422,38 @@ class CompassService:
 
         return input_text, []
 
+    def _profile_activity_context(self) -> str:
+        lines: list[str] = []
+        with session_scope() as session:
+            action_rows = session.execute(
+                select(CollectionAction)
+                .order_by(CollectionAction.created_at.desc())
+                .limit(8)
+            ).scalars().all()
+            deep_rows = session.execute(
+                select(Paper)
+                .where(Paper.read_status == ReadStatus.deep_read)
+                .order_by(Paper.updated_at.desc())
+                .limit(8)
+            ).scalars().all()
+
+            if action_rows:
+                lines.append("Recent searches and collection actions:")
+                for row in action_rows:
+                    action_type = getattr(row.action_type, "value", str(row.action_type))
+                    query = f"; query={row.query}" if row.query else ""
+                    lines.append(f"- {action_type}: {row.title}{query}; papers={row.paper_count}")
+            if deep_rows:
+                lines.append("Recently deep-read papers:")
+                for paper in deep_rows:
+                    published = (
+                        paper.publication_date.isoformat()
+                        if paper.publication_date
+                        else "unknown date"
+                    )
+                    lines.append(f"- {paper.title} ({published})")
+        return "\n".join(lines) if lines else "No local activity yet."
+
     def _profile_prompt(
         self,
         source: str,
@@ -1328,6 +1468,7 @@ class CompassService:
             for item in answers
             if isinstance(item, dict) and (_safe_text(item.get("question")) or _safe_text(item.get("answer")))
         ]
+        activity_context = self._profile_activity_context()
         return "\n".join(
             [
                 "You are the profile-building agent for Scholar Profile.",
@@ -1344,12 +1485,18 @@ class CompassService:
                 f"Interests: {current_profile.get('interests') or 'empty'}",
                 f"Research directions: {current_profile.get('researchDirections') or 'empty'}",
                 f"Reading goal: {current_profile.get('readingGoal') or 'empty'}",
+                f"Quick profile JSON: {json.dumps(current_profile.get('quickProfile') or {}, ensure_ascii=False)}",
                 "",
                 "User answers:",
                 json.dumps(normalized_answers, ensure_ascii=False),
                 "",
+                "Local behavior evidence from ScholarMind searches, collection, and deep reading:",
+                activity_context,
+                "",
                 "Source material for profile initialization:",
                 source,
+                "",
+                "Preserve the user's quickProfile.recencyPreference semantics when present: recent means mostly new papers, balanced means recent plus some classics, classic means older foundational papers are acceptable.",
             ]
         )
 

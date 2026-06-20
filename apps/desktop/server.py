@@ -33,7 +33,6 @@ def _setup_data_dir(data_dir: Path) -> None:
     """确保数据目录结构完整"""
     data_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / "papers").mkdir(exist_ok=True)
-    (data_dir / "briefs").mkdir(exist_ok=True)
 
 
 def _apply_env_overrides(data_dir: Path, env_file: Path | None) -> None:
@@ -43,7 +42,6 @@ def _apply_env_overrides(data_dir: Path, env_file: Path | None) -> None:
     """
     os.environ["DATABASE_URL"] = f"sqlite:///{data_dir / 'scholarmind.db'}"
     os.environ["PDF_STORAGE_ROOT"] = str(data_dir / "papers")
-    os.environ["BRIEF_OUTPUT_ROOT"] = str(data_dir / "briefs")
 
     if env_file and env_file.is_file():
         os.environ["SCHOLARMIND_ENV_FILE"] = str(env_file)

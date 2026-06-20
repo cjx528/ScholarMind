@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback, useMemo, useRef, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Badge, Empty, Spinner, Modal, Input } from "@/components/ui";
 import { PaperListSkeleton } from "@/components/Skeleton";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { useToast } from "@/contexts/ToastContext";
 import { paperApi, ingestApi, topicApi, pipelineApi, actionApi, tasksApi, tagApi } from "@/services/api";
 import { formatDate, truncate } from "@/lib/utils";
@@ -58,6 +59,58 @@ interface FolderItem {
   dateStr?: string;
 }
 
+const PAPER_LIBRARY_STATE_KEY = "scholarmind.paperLibrary.returnState";
+
+interface PaperLibraryReturnState {
+  paperId: string;
+  scrollTop: number;
+  page: number;
+  searchTerm: string;
+  debouncedSearch: string;
+  activeFolder: string;
+  activeDate?: string;
+  activeActionId?: string;
+  sortBy: string;
+  sortOrder: "asc" | "desc";
+  statusFilter: string;
+  activeCategory?: string;
+  activeTagIds: string[];
+  viewMode: "list" | "grid";
+  savedAt: number;
+}
+
+function readPaperLibraryReturnState(): PaperLibraryReturnState | null {
+  try {
+    const raw = sessionStorage.getItem(PAPER_LIBRARY_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PaperLibraryReturnState>;
+    if (!parsed.paperId || !parsed.savedAt) return null;
+    if (Date.now() - parsed.savedAt > 6 * 60 * 60 * 1000) {
+      sessionStorage.removeItem(PAPER_LIBRARY_STATE_KEY);
+      return null;
+    }
+    return {
+      paperId: parsed.paperId,
+      scrollTop: parsed.scrollTop ?? 0,
+      page: parsed.page ?? 1,
+      searchTerm: parsed.searchTerm ?? "",
+      debouncedSearch: parsed.debouncedSearch ?? parsed.searchTerm ?? "",
+      activeFolder: parsed.activeFolder ?? "all",
+      activeDate: parsed.activeDate,
+      activeActionId: parsed.activeActionId,
+      sortBy: parsed.sortBy ?? "created_at",
+      sortOrder: parsed.sortOrder === "asc" ? "asc" : "desc",
+      statusFilter: parsed.statusFilter ?? "",
+      activeCategory: parsed.activeCategory,
+      activeTagIds: Array.isArray(parsed.activeTagIds) ? parsed.activeTagIds : [],
+      viewMode: parsed.viewMode === "grid" ? "grid" : "list",
+      savedAt: parsed.savedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
 const statusBadge: Record<string, { label: string; variant: "default" | "warning" | "success" }> = {
   unread: { label: "未读", variant: "default" },
   skimmed: { label: "已粗读", variant: "warning" },
@@ -83,49 +136,68 @@ function formatDateLabel(dateStr: string): string {
 export default function Papers() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const returnStateRef = useRef<PaperLibraryReturnState | null>(readPaperLibraryReturnState());
+  const skipInitialSearchDebounceRef = useRef(Boolean(returnStateRef.current));
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const initialReturnState = returnStateRef.current;
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState(initialReturnState?.searchTerm ?? "");
   const [ingestOpen, setIngestOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<Paper | null>(null);
   const [batchRunning, setBatchRunning] = useState(false);
   const [venueRunning, setVenueRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState("");
   const [batchPct, setBatchPct] = useState(0);
-  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
+  const [viewMode, setViewMode] = useState<"list" | "grid">(
+    initialReturnState?.viewMode ?? "list"
+  );
 
   /* 分页 */
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(initialReturnState?.page ?? 1);
   const [pageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
   /* 文件夹相关 */
   const [folderStats, setFolderStats] = useState<FolderStats | null>(null);
-  const [activeFolder, setActiveFolder] = useState("all");
-  const [activeDate, setActiveDate] = useState<string | undefined>();
+  const [activeFolder, setActiveFolder] = useState(initialReturnState?.activeFolder ?? "all");
+  const [activeDate, setActiveDate] = useState<string | undefined>(
+    initialReturnState?.activeDate
+  );
   const [statsLoading, setStatsLoading] = useState(true);
   const [dateSectionOpen, setDateSectionOpen] = useState(false);
 
   /* 行动记录 */
   const [actionsList, setActionsList] = useState<CollectionAction[]>([]);
   const [actionSectionOpen, setActionSectionOpen] = useState(false);
-  const [activeActionId, setActiveActionId] = useState<string | undefined>();
+  const [activeActionId, setActiveActionId] = useState<string | undefined>(
+    initialReturnState?.activeActionId
+  );
 
   /* 搜索防抖 */
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState(
+    initialReturnState?.debouncedSearch ?? initialReturnState?.searchTerm ?? ""
+  );
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   /* 排序 + 状态筛选 */
-  const [sortBy, setSortBy] = useState("created_at");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [activeCategory, setActiveCategory] = useState<string | undefined>();
+  const [sortBy, setSortBy] = useState(initialReturnState?.sortBy ?? "created_at");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">(
+    initialReturnState?.sortOrder ?? "desc"
+  );
+  const [statusFilter, setStatusFilter] = useState(initialReturnState?.statusFilter ?? "");
+  const [activeCategory, setActiveCategory] = useState<string | undefined>(
+    initialReturnState?.activeCategory
+  );
   const [csFeeds, setCsFeeds] = useState<{ category_code: string; category_name: string }[]>([]);
 
   /* 标签相关 */
   const [tags, setTags] = useState<TagType[]>([]);
-  const [activeTagIds, setActiveTagIds] = useState<string[]>([]);
+  const [activeTagIds, setActiveTagIds] = useState<string[]>(
+    initialReturnState?.activeTagIds ?? []
+  );
   const [tagSectionOpen, setTagSectionOpen] = useState(false);
   const [tagModalOpen, setTagModalOpen] = useState(false);
   const [editingTag, setEditingTag] = useState<TagType | null>(null);
@@ -137,7 +209,11 @@ export default function Papers() {
     clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
       setDebouncedSearch(searchTerm.trim());
-      setPage(1);
+      if (skipInitialSearchDebounceRef.current) {
+        skipInitialSearchDebounceRef.current = false;
+      } else {
+        setPage(1);
+      }
     }, 350);
     return () => clearTimeout(searchTimerRef.current);
   }, [searchTerm]);
@@ -414,6 +490,28 @@ export default function Papers() {
   /* 搜索由后端处理，前端直接使用 papers */
   const filtered = papers;
 
+  useEffect(() => {
+    const restore = returnStateRef.current;
+    if (!restore || loading) return;
+    const container = listScrollRef.current;
+    if (!container) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const target = container.querySelector<HTMLElement>(
+        `[data-paper-id="${restore.paperId}"]`
+      );
+      if (target) {
+        target.scrollIntoView({ block: "center" });
+      } else {
+        container.scrollTop = restore.scrollTop;
+      }
+      sessionStorage.removeItem(PAPER_LIBRARY_STATE_KEY);
+      returnStateRef.current = null;
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [filtered, loading]);
+
   const toggleSelect = useCallback((id: string) => {
     setSelected((prev) => {
       const n = new Set(prev);
@@ -426,6 +524,55 @@ export default function Papers() {
       prev.size === filtered.length ? new Set() : new Set(filtered.map((p) => p.id))
     );
   }, [filtered]);
+
+  const saveReturnState = useCallback(
+    (paperId: string) => {
+      const state: PaperLibraryReturnState = {
+        paperId,
+        scrollTop: listScrollRef.current?.scrollTop ?? 0,
+        page,
+        searchTerm,
+        debouncedSearch,
+        activeFolder,
+        activeDate,
+        activeActionId,
+        sortBy,
+        sortOrder,
+        statusFilter,
+        activeCategory,
+        activeTagIds,
+        viewMode,
+        savedAt: Date.now(),
+      };
+      try {
+        sessionStorage.setItem(PAPER_LIBRARY_STATE_KEY, JSON.stringify(state));
+      } catch {
+        // Restoring position is a convenience; navigation should still work.
+      }
+    },
+    [
+      activeActionId,
+      activeCategory,
+      activeDate,
+      activeFolder,
+      activeTagIds,
+      debouncedSearch,
+      page,
+      searchTerm,
+      sortBy,
+      sortOrder,
+      statusFilter,
+      viewMode,
+    ]
+  );
+
+  const openPaper = useCallback(
+    (paperId: string) => {
+      saveReturnState(paperId);
+      navigate(`/papers/${paperId}`);
+    },
+    [navigate, saveReturnState]
+  );
 
   const handleToggleFavorite = useCallback(
     async (e: React.MouseEvent, id: string) => {
@@ -445,6 +592,28 @@ export default function Papers() {
     },
     [loadFolderStats, toast]
   );
+
+  const handleConfirmDeletePaper = useCallback(async () => {
+    if (!deleteTarget) return;
+    try {
+      const res = await paperApi.delete(deleteTarget.id);
+      toast(
+        res.pdf_cleanup_error ? "warning" : "success",
+        res.pdf_cleanup_error
+          ? `论文已删除，PDF 清理失败：${res.pdf_cleanup_error}`
+          : "论文已删除"
+      );
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(deleteTarget.id);
+        return next;
+      });
+      setDeleteTarget(null);
+      await Promise.all([loadPapers(), loadFolderStats(), loadTags()]);
+    } catch (err) {
+      toast("error", err instanceof Error ? err.message : "删除论文失败");
+    }
+  }, [deleteTarget, loadFolderStats, loadPapers, loadTags, toast]);
 
   const handleBatchSkim = async () => {
     const ids = [...selected].filter((id) => {
@@ -1112,7 +1281,7 @@ export default function Papers() {
         </div>
 
         {/* 论文列表 */}
-        <div className="flex-1 overflow-y-auto">
+        <div ref={listScrollRef} className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="p-4">
               <PaperListSkeleton />
@@ -1156,7 +1325,11 @@ export default function Papers() {
                       selected={selected.has(paper.id)}
                       onSelect={() => toggleSelect(paper.id)}
                       onFavorite={(e) => handleToggleFavorite(e, paper.id)}
-                      onClick={() => navigate(`/papers/${paper.id}`)}
+                      onDelete={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(paper);
+                      }}
+                      onClick={() => openPaper(paper.id)}
                     />
                   ))}
                 </div>
@@ -1167,7 +1340,11 @@ export default function Papers() {
                       key={paper.id}
                       paper={paper}
                       onFavorite={(e) => handleToggleFavorite(e, paper.id)}
-                      onClick={() => navigate(`/papers/${paper.id}`)}
+                      onDelete={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(paper);
+                      }}
+                      onClick={() => openPaper(paper.id)}
                     />
                   ))}
                 </div>
@@ -1270,6 +1447,20 @@ export default function Papers() {
         }}
       />
 
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="删除论文"
+        description={
+          deleteTarget
+            ? `将从论文库删除「${truncate(deleteTarget.title, 80)}」。相关分析、标签关联和本地 PDF 会一并清理。`
+            : undefined
+        }
+        confirmLabel="删除"
+        variant="danger"
+        onConfirm={handleConfirmDeletePaper}
+        onCancel={() => setDeleteTarget(null)}
+      />
+
       <TagModal
         open={tagModalOpen}
         onClose={() => {
@@ -1295,17 +1486,20 @@ const PaperListItem = memo(function PaperListItem({
   selected,
   onSelect,
   onFavorite,
+  onDelete,
   onClick,
 }: {
   paper: Paper;
   selected: boolean;
   onSelect: () => void;
   onFavorite: (e: React.MouseEvent) => void;
+  onDelete: (e: React.MouseEvent) => void;
   onClick: () => void;
 }) {
   const sc = statusBadge[paper.read_status] || statusBadge.unread;
   return (
     <div
+      data-paper-id={paper.id}
       className={`group bg-surface rounded-xl border transition-all hover:shadow-sm ${
         selected ? "border-primary/30 ring-primary/10 ring-1" : "border-border/60"
       }`}
@@ -1425,6 +1619,14 @@ const PaperListItem = memo(function PaperListItem({
             className={`h-3.5 w-3.5 ${paper.favorited ? "fill-red-500 text-red-500" : "text-ink-tertiary"}`}
           />
         </button>
+        <button
+          aria-label="删除论文"
+          title="删除论文"
+          onClick={onDelete}
+          className="text-ink-tertiary hover:bg-error/10 hover:text-error mt-0.5 shrink-0 rounded-lg p-1 transition-colors"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
   );
@@ -1434,15 +1636,18 @@ const PaperListItem = memo(function PaperListItem({
 const PaperGridItem = memo(function PaperGridItem({
   paper,
   onFavorite,
+  onDelete,
   onClick,
 }: {
   paper: Paper;
   onFavorite: (e: React.MouseEvent) => void;
+  onDelete: (e: React.MouseEvent) => void;
   onClick: () => void;
 }) {
   const sc = statusBadge[paper.read_status] || statusBadge.unread;
   return (
     <div
+      data-paper-id={paper.id}
       role="button"
       tabIndex={0}
       onClick={onClick}
@@ -1451,15 +1656,25 @@ const PaperGridItem = memo(function PaperGridItem({
     >
       <div className="mb-2 flex items-center justify-between">
         <Badge variant={sc.variant}>{sc.label}</Badge>
-        <button
-          aria-label={paper.favorited ? "取消收藏" : "收藏"}
-          onClick={onFavorite}
-          className="hover:bg-error/10 rounded-lg p-1 transition-colors"
-        >
-          <Heart
-            className={`h-3.5 w-3.5 ${paper.favorited ? "fill-red-500 text-red-500" : "text-ink-tertiary"}`}
-          />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            aria-label={paper.favorited ? "取消收藏" : "收藏"}
+            onClick={onFavorite}
+            className="hover:bg-error/10 rounded-lg p-1 transition-colors"
+          >
+            <Heart
+              className={`h-3.5 w-3.5 ${paper.favorited ? "fill-red-500 text-red-500" : "text-ink-tertiary"}`}
+            />
+          </button>
+          <button
+            aria-label="删除论文"
+            title="删除论文"
+            onClick={onDelete}
+            className="text-ink-tertiary hover:bg-error/10 hover:text-error rounded-lg p-1 transition-colors"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
       <h3 className="text-ink group-hover:text-primary line-clamp-2 text-[13px] leading-snug font-semibold transition-colors">
         {paper.title}

@@ -51,6 +51,24 @@ export interface Conversation extends ConversationMeta {
   messages: ConversationMessage[];
 }
 
+interface ConversationSeedMessage {
+  type: ConversationMessage["type"];
+  content: string;
+  steps?: ConversationMessageStep[];
+  actionId?: string;
+  actionDescription?: string;
+  actionTool?: string;
+  toolArgs?: Record<string, unknown>;
+  artifactTitle?: string;
+  artifactContent?: string;
+  artifactIsHtml?: boolean;
+}
+
+export interface ConversationSeed {
+  title?: string;
+  messages?: ConversationSeedMessage[];
+}
+
 /**
  * 从 localStorage 加载对话列表（仅元信息）
  */
@@ -165,15 +183,30 @@ export function useConversations() {
   /**
    * 创建新对话
    */
-  const createConversation = useCallback((): string => {
+  const createConversation = useCallback((seed?: ConversationSeed): string => {
     const now = new Date().toISOString();
     const id = uid();
+    const messages: ConversationMessage[] = (seed?.messages || []).map((m) => ({
+      id: `${m.type}_${uid()}`,
+      type: m.type,
+      content: m.content,
+      timestamp: now,
+      steps: m.steps,
+      actionId: m.actionId,
+      actionDescription: m.actionDescription,
+      actionTool: m.actionTool,
+      toolArgs: m.toolArgs,
+      artifactTitle: m.artifactTitle,
+      artifactContent: m.artifactContent,
+      artifactIsHtml: m.artifactIsHtml,
+    }));
+    const title = seed?.title || autoTitle(messages);
     const conv: Conversation = {
       id,
-      title: "新对话",
+      title,
       createdAt: now,
       updatedAt: now,
-      messages: [],
+      messages,
     };
     saveConversation(conv);
     const newMetas = [

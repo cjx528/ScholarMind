@@ -51,7 +51,6 @@ const STAGE_LABELS: Record<string, string> = {
   wiki_overview: "Wiki 概述",
   keyword_suggest: "关键词建议",
   pdf_reader_ai: "PDF 阅读助手",
-  daily_brief: "研究简报",
   translate: "标题翻译",
 };
 
@@ -61,7 +60,6 @@ const PIPELINE_LABELS: Record<string, string> = {
   embed_paper: "向量化",
   ingest_arxiv: "arXiv 收集",
   ingest_arxiv_with_ids: "订阅收集",
-  daily_brief: "每日简报",
   daily_graph_maintenance: "图维护",
 };
 

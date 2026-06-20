@@ -59,8 +59,8 @@ SYSTEM_PROMPT = """\
 4. **分析论文**（"粗读"、"精读"、"分析图表"）
    → 先确认目标论文 ID，再调对应工具
 
-5. **生成内容**（"Wiki"、"综述"、"简报"）
-   → 调 generate_wiki 或 generate_daily_brief
+5. **生成内容**（"Wiki"、"综述"）
+   → 调 generate_wiki
 
 6. **订阅管理**（"订阅"、"定时"、"每天收集"）
    → 调 manage_subscription
@@ -94,7 +94,7 @@ SYSTEM_PROMPT = """\
    - ❌「已成功找到 20 篇论文」→ 然后才调工具
    - ✅「正在搜索...」→ 调工具 → 看到结果后再描述
 3. **主动推进**：一步完成后立即进入下一步，不要等用户催促。
-4. **每次只调一个写操作工具**（ingest/skim/deep_read/embed/wiki/brief），等确认后继续。
+4. **每次只调一个写操作工具**（ingest/skim/deep_read/embed/wiki），等确认后继续。
    只读工具（search/ask/get_detail/timeline/list_topics）可以连续调多个。
 5. **不重复失败操作**：工具返回 success=false 时，分析 summary 中的原因，\
    告知用户并建议替代方案，不要用相同参数重试。
@@ -319,7 +319,7 @@ def _build_compass_user_profile() -> str:
             return ""
         return (
             "\n\n## Scholar Profile User Profile\n"
-            "Use this profile in every feature: search, recommendation, ingestion, paper analysis, Wiki, brief and QA. "
+            "Use this profile in every feature: search, recommendation, ingestion, paper analysis, Wiki and QA. "
             "If the user asks for paper recommendations based on their profile, suitable papers, or papers worth reading, "
             "call recommend_profile_papers before answering. For arXiv search, prefer positive interests and avoid downrank areas.\n"
             + "\n".join(f"- {part}" for part in parts)

@@ -31,9 +31,7 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:////app/data/scholarmind.db"
     pdf_storage_root: Path = Path("./data/papers")
-    brief_output_root: Path = Path("./data/briefs")
     skim_score_threshold: float = 0.65
-    daily_cron: str = "0 21 * * *"
     weekly_cron: str = "0 22 * * 0"
     cors_allow_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"  # 开发环境
@@ -66,8 +64,6 @@ class Settings(BaseSettings):
 
     # 并发与缓存
     paper_concurrency: int = 5
-    brief_cache_ttl: int = 300
-
     cost_guard_enabled: bool = True
     per_call_budget_usd: float = 0.05
     daily_budget_usd: float = 2.0
@@ -78,7 +74,7 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     smtp_from: str | None = None
     notify_default_to: str | None = None
-    # 用户时区（影响"今天"判定、日报日期、按日分组等面向用户的日期逻辑）
+    # 用户时区（影响"今天"判定和按日分组等面向用户的日期逻辑）
     user_timezone: str = "Asia/Shanghai"
 
     model_config = SettingsConfigDict(
@@ -92,7 +88,6 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     settings = Settings()
     settings.pdf_storage_root.mkdir(parents=True, exist_ok=True)
-    settings.brief_output_root.mkdir(parents=True, exist_ok=True)
     db_parent = Path(settings.database_url.replace("sqlite:///", "")).parent
     db_parent.mkdir(parents=True, exist_ok=True)
     return settings

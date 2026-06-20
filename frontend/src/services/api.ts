@@ -18,10 +18,10 @@ import type {
   PaperAskResponse,
   PaperWiki,
   TopicWiki,
-  DailyBriefRequest,
-  DailyBriefResponse,
   CostMetrics,
   IngestResult,
+  ArxivPreviewCandidate,
+  ArxivPreviewResponse,
   KeywordSuggestion,
   ReasoningAnalysisResponse,
   TodaySummary,
@@ -35,7 +35,6 @@ import type {
   CollectionAction,
   EmailConfig,
   EmailConfigForm,
-  DailyReportConfig,
   TaskStatus,
   ActiveTaskInfo,
   AIBackendConfig,
@@ -48,6 +47,7 @@ import type {
   TagUpdate,
   CompassBackend,
   CompassAnalysisResult,
+  CompassPaperAnalysisResponse,
   CompassProfileBuildResponse,
   CompassProfileResponse,
   CompassPreferenceModel,
@@ -65,7 +65,6 @@ export type {
   CollectionAction,
   EmailConfig,
   EmailConfigForm,
-  DailyReportConfig,
   TaskStatus,
   ActiveTaskInfo,
   LoginResponse,
@@ -318,6 +317,15 @@ export const paperApi = {
     }>(`/papers/recommended?top_k=${topK}`),
   folderStats: () => get<FolderStats>("/papers/folder-stats"),
   detail: (id: string) => get<Paper>(`/papers/${id}`),
+  delete: (id: string) =>
+    del<{
+      deleted: string;
+      title: string;
+      arxiv_id?: string;
+      pdf_removed: boolean;
+      pdf_cleanup_error?: string | null;
+      related?: Record<string, number>;
+    }>(`/papers/${id}`),
   similar: (id: string, topK = 5) =>
     get<{
       paper_id: string;
@@ -379,6 +387,8 @@ export const compassApi = {
     mode?: string;
     backend?: CompassBackend;
   }) => post<CompassAnalysisResult>("/recommendation/analyze", data),
+  paperAnalysis: (paperId: string) =>
+    get<CompassPaperAnalysisResponse>(`/recommendation/papers/${paperId}/analysis`),
   queue: (topK = 20) => get<CompassQueueResponse>(`/recommendation/queue?top_k=${topK}`),
   feedback: (data: {
     recommendation_id?: string | null;
@@ -404,6 +414,51 @@ export const dailyRadarApi = {
 };
 
 export const ingestApi = {
+  arxivPreview: (
+    query: string,
+    maxResults = 20,
+    sortBy = "submittedDate",
+    daysBack = 180,
+    csOnly = true
+  ) => {
+    const params = new URLSearchParams({
+      query,
+      max_results: String(maxResults),
+      sort_by: sortBy,
+      days_back: String(daysBack),
+      cs_only: String(csOnly),
+    });
+    return post<ArxivPreviewResponse>(`/ingest/arxiv/preview?${params}`);
+  },
+  arxivSelected: (query: string, arxivIds: string[], topicId?: string) =>
+    post<IngestResult>("/ingest/arxiv/selected", {
+      query,
+      arxiv_ids: arxivIds,
+      topic_id: topicId || null,
+    }),
+  searchPreview: (
+    query: string,
+    maxResults = 20,
+    sources: string[] = ["arxiv"],
+    sortBy = "submittedDate",
+    daysBack = 180,
+    csOnly = true
+  ) => {
+    const params = new URLSearchParams({
+      query,
+      max_results: String(maxResults),
+      sort_by: sortBy,
+      days_back: String(daysBack),
+      cs_only: String(csOnly),
+    });
+    sources.forEach((source) => params.append("sources", source));
+    return post<ArxivPreviewResponse>(`/ingest/search/preview?${params}`);
+  },
+  searchSelected: (query: string, candidates: ArxivPreviewCandidate[]) =>
+    post<IngestResult>("/ingest/search/selected", {
+      query,
+      candidates,
+    }),
   arxiv: (
     query: string,
     maxResults = 20,
@@ -472,11 +527,6 @@ export const wikiApi = {
   paper: (paperId: string) => get<PaperWiki>(`/wiki/paper/${paperId}`),
   topic: (keyword: string, limit = 120) =>
     get<TopicWiki>(`/wiki/topic?keyword=${encodeURIComponent(keyword)}&limit=${limit}`),
-};
-
-/* ========== 简报 ========== */
-export const briefApi = {
-  daily: (data?: DailyBriefRequest) => post<DailyBriefResponse>("/brief/daily", data),
 };
 
 /* ========== 生成内容历史 ========== */
@@ -558,12 +608,14 @@ export const agentApi = {
   chat: async (
     messages: AgentMessage[],
     conversationId?: string,
-    confirmedActionId?: string
+    confirmedActionId?: string,
+    signal?: AbortSignal
   ): Promise<Response> => {
-    const url = `${getApiBase().replace(/\/\/+$/, "")}/agent/chat`;
+    const url = `${getApiBase().replace(/\/+$/, "")}/agent/chat`;
     return fetchSSE(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal,
       body: JSON.stringify({
         messages,
         conversation_id: conversationId || null,
@@ -571,13 +623,13 @@ export const agentApi = {
       }),
     });
   },
-  confirm: async (actionId: string): Promise<Response> => {
+  confirm: async (actionId: string, signal?: AbortSignal): Promise<Response> => {
     const url = `${getApiBase().replace(/\/+$/, "")}/agent/confirm/${actionId}`;
-    return fetchSSE(url, { method: "POST" });
+    return fetchSSE(url, { method: "POST", signal });
   },
-  reject: async (actionId: string): Promise<Response> => {
+  reject: async (actionId: string, signal?: AbortSignal): Promise<Response> => {
     const url = `${getApiBase().replace(/\/+$/, "")}/agent/reject/${actionId}`;
-    return fetchSSE(url, { method: "POST" });
+    return fetchSSE(url, { method: "POST", signal });
   },
 };
 
@@ -596,21 +648,6 @@ export const emailConfigApi = {
     ),
 };
 
-/* ========== 每日报告配置 ========== */
-export const dailyReportApi = {
-  getConfig: () => get<DailyReportConfig>("/settings/daily-report-config"),
-  updateConfig: (data: Record<string, unknown>) =>
-    put<{ config: DailyReportConfig }>("/settings/daily-report-config", data),
-  runOnce: () => post<Record<string, unknown>>("/jobs/daily-report/run-once"),
-  sendOnly: (recipientEmails?: string[]) =>
-    post<Record<string, unknown>>(
-      "/jobs/daily-report/send-only",
-      recipientEmails ? { recipient_emails: recipientEmails } : {}
-    ),
-  generateOnly: (useCache = false) =>
-    post<{ html: string }>(`/jobs/daily-report/generate-only?use_cache=${useCache}`),
-};
-
 /* ========== 后台任务 ========== */
 export const tasksApi = {
   active: () => get<{ tasks: ActiveTaskInfo[] }>("/tasks/active"),
@@ -618,6 +655,8 @@ export const tasksApi = {
     post<{ task_id: string; status: string }>(
       `/tasks/wiki/topic?keyword=${encodeURIComponent(keyword)}&limit=${limit}`
     ),
+  startPaperWiki: (paperId: string) =>
+    post<{ task_id: string; status: string }>(`/tasks/wiki/paper/${paperId}`),
   getStatus: (taskId: string) => get<TaskStatus>(`/tasks/${taskId}`),
   getResult: (taskId: string) => get<Record<string, unknown>>(`/tasks/${taskId}/result`),
   list: (taskType?: string, limit = 20) =>
