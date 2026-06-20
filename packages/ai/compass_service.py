@@ -8,12 +8,13 @@ import re
 import shutil
 import subprocess
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -1120,10 +1121,8 @@ class CompassService:
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"Codex CLI 调用超时（{int(timeout)} 秒）。") from exc
         finally:
-            try:
+            with suppress(OSError):
                 Path(output_path).unlink(missing_ok=True)
-            except OSError:
-                pass
 
     def _normalize_profile_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else {}
@@ -1407,7 +1406,7 @@ class CompassService:
                         [
                             f"Title: {paper.title}",
                             f"Authors: {', '.join(str(x) for x in meta.get('authors', []))}",
-                            f"Venue: arXiv",
+                            "Venue: arXiv",
                             f"arXiv: {paper.arxiv_id}",
                             f"Source URL: https://arxiv.org/abs/{paper.arxiv_id}",
                             f"PDF URL: https://arxiv.org/pdf/{paper.arxiv_id}.pdf",
@@ -1473,12 +1472,14 @@ class CompassService:
             [
                 "You are the profile-building agent for Scholar Profile.",
                 "Build a personalized research reading profile, not a resume.",
+                "Only generate the user profile itself. Do not generate paper recommendations, ranked paper lists, recommendation cards, or per-paper recommendation explanations here.",
+                "Other ScholarMind features will read this profile when they search, recommend, analyze, or answer questions.",
                 "Return one JSON object with keys: profile, questions, notes, confidence.",
                 "profile.interests must be a rich Chinese paragraph of 80-160 characters describing the user's current research taste, positive interests, and topics to avoid.",
-                "profile.researchDirections must be a rich Chinese paragraph of 80-180 characters describing concrete research directions, modalities, methods, and paper types to prioritize.",
+                "profile.researchDirections must be a rich Chinese paragraph of 80-180 characters describing concrete research directions, modalities, methods, and useful paper types, without phrasing it as a recommendation list.",
                 "profile.readingGoal must be a rich Chinese paragraph of 60-140 characters describing why the user reads papers now: idea discovery, baselines, reproducible code, domain mapping, product judgment, or writing support.",
-                "notes should contain 4 to 7 short Chinese bullets for recommendation strategy, negative preferences, risk appetite, source/code preference, and what should trigger high priority.",
-                "questions should be 6 to 10 high-signal Chinese questions that improve recommendation quality.",
+                "notes should contain 4 to 7 short Chinese profile notes about negative preferences, risk appetite, source/code preference, recency preference, and usage context. Do not label them as recommendation strategy.",
+                "questions should be 3 to 6 high-signal Chinese questions that clarify the research profile.",
                 "Avoid generic biography questions.",
                 "",
                 "Current saved profile:",

@@ -1,43 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  BookOpen,
   Brain,
   CheckCircle2,
-  ExternalLink,
   Loader2,
   Plus,
   Radar,
-  RefreshCw,
   Save,
-  Star,
   Wand2,
 } from "lucide-react";
 import { compassApi } from "@/services/api";
-import type {
-  CompassAnalysisBlock,
-  CompassAnalysisResult,
-  CompassFactorKey,
-  CompassPreferenceModel,
-  CompassUserProfile,
-} from "@/types";
-
-const FACTOR_KEYS: CompassFactorKey[] = [
-  "profileFit",
-  "novelty",
-  "paperImportance",
-  "sourceSignal",
-  "actionability",
-  "freshness",
-];
-
-const FACTOR_LABELS: Record<CompassFactorKey, string> = {
-  profileFit: "画像匹配",
-  novelty: "新信息量",
-  paperImportance: "论文重要性",
-  sourceSignal: "来源信号",
-  actionability: "可行动性",
-  freshness: "近期性",
-};
+import type { CompassUserProfile } from "@/types";
 
 type QuickProfile = {
   currentInterests: string[];
@@ -64,19 +36,6 @@ const EMPTY_PROFILE: CompassUserProfile = {
   questions: [],
   notes: [],
   confidence: 0,
-};
-
-const EMPTY_MODEL: CompassPreferenceModel = {
-  weights: {
-    profileFit: 0.34,
-    novelty: 0.14,
-    paperImportance: 0.18,
-    sourceSignal: 0.1,
-    actionability: 0.16,
-    freshness: 0.08,
-  },
-  bias: 0,
-  ratingCount: 0,
 };
 
 const DEFAULT_QUICK_PROFILE: QuickProfile = {
@@ -171,20 +130,6 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "操作失败";
 }
 
-function titleOf(item: CompassAnalysisResult | null) {
-  if (!item) return "";
-  return item.paper?.title || item.title || "未命名论文";
-}
-
-function summaryOf(item: CompassAnalysisResult) {
-  return item.paper?.plainSummary || item.abstract || "暂无摘要。";
-}
-
-function sourceLabel(item: CompassAnalysisResult) {
-  if (item.status === "library") return "论文库";
-  return item.source_type || "text";
-}
-
 function stringArray(value: unknown) {
   return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
 }
@@ -250,9 +195,6 @@ function quickProfileAnswers(quickProfile: QuickProfile) {
 
 export default function Compass() {
   const [profile, setProfile] = useState<CompassUserProfile>(EMPTY_PROFILE);
-  const [model, setModel] = useState<CompassPreferenceModel>(EMPTY_MODEL);
-  const [queue, setQueue] = useState<CompassAnalysisResult[]>([]);
-  const [active, setActive] = useState<CompassAnalysisResult | null>(null);
   const [quickProfile, setQuickProfile] = useState<QuickProfile>(DEFAULT_QUICK_PROFILE);
   const [customQuickInputs, setCustomQuickInputs] = useState<Record<QuickGroupKey, string>>(
     EMPTY_CUSTOM_QUICK_INPUTS
@@ -263,27 +205,14 @@ export default function Compass() {
 
   const load = useCallback(async () => {
     setError(null);
-    const [profileRes, queueRes] = await Promise.all([compassApi.profile(), compassApi.queue(30)]);
+    const profileRes = await compassApi.profile();
     setProfile(profileRes.profile);
-    setModel(profileRes.model);
     setQuickProfile(normalizeQuickProfile(profileRes.profile.quickProfile));
-    setQueue(queueRes.items);
-    setActive((current) => current ?? queueRes.items[0] ?? null);
   }, []);
 
   useEffect(() => {
     load().catch((err) => setError(errorMessage(err)));
   }, [load]);
-
-  const weightedLabels = useMemo(
-    () =>
-      FACTOR_KEYS.map((key) => ({
-        key,
-        label: FACTOR_LABELS[key],
-        weight: Math.round((model.weights?.[key] ?? 0) * 100),
-      })),
-    [model.weights]
-  );
 
   const toggleQuickChoice = (key: QuickGroupKey, value: string) => {
     setQuickProfile((current) => {
@@ -320,7 +249,6 @@ export default function Compass() {
         quickProfile,
       });
       setProfile(res.profile);
-      setModel(res.model);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -352,63 +280,8 @@ export default function Compass() {
         ],
       });
       setProfile(res.profile);
+      setQuickProfile(normalizeQuickProfile(res.profile.quickProfile));
       setAnswers({});
-      await load();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const analyzePaper = async (item: CompassAnalysisResult) => {
-    setBusy(`paper-${item.paper_id || item.id}`);
-    setError(null);
-    try {
-      const result = await compassApi.analyze({
-        input: titleOf(item),
-        paper_id: item.paper_id || item.id,
-        mode: "library",
-      });
-      setActive(result);
-      await load();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const rate = async (value: number) => {
-    if (!active) return;
-    setBusy(`rate-${value}`);
-    setError(null);
-    try {
-      const res = await compassApi.feedback({
-        recommendation_id: active.status === "library" ? null : active.id,
-        paper_id: active.paper_id || active.id,
-        rating: value,
-        factors: active.recommendation.factors,
-        base_score: active.recommendation.score,
-      });
-      setModel(res.model);
-      setActive((prev) => (prev ? { ...prev, user_rating: value } : prev));
-      const queueRes = await compassApi.queue(30);
-      setQueue(queueRes.items);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const resetModel = async () => {
-    setBusy("reset-model");
-    setError(null);
-    try {
-      const res = await compassApi.resetModel();
-      setModel(res.model);
-      await load();
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -418,14 +291,14 @@ export default function Compass() {
 
   return (
     <div className="min-h-full bg-page px-4 py-5 text-ink sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-[1480px] flex-col gap-5">
+      <div className="mx-auto flex max-w-3xl flex-col gap-5">
         <header className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-primary">
               <Radar className="h-4 w-4" />
               Scholar Profile
             </div>
-            <h1 className="text-2xl font-semibold text-ink">用户画像与论文匹配</h1>
+            <h1 className="text-2xl font-semibold text-ink">用户画像</h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -445,7 +318,7 @@ export default function Compass() {
           </div>
         )}
 
-        <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)_380px]">
+        <div>
           <section className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-4">
             <div className="flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-base font-semibold">
@@ -577,14 +450,14 @@ export default function Compass() {
                   <ProfileParagraph title="关注偏好" body={profile.interests} />
                 )}
                 {profile.researchDirections && (
-                  <ProfileParagraph title="推荐方向" body={profile.researchDirections} />
+                  <ProfileParagraph title="研究方向" body={profile.researchDirections} />
                 )}
                 {profile.readingGoal && (
                   <ProfileParagraph title="阅读目标" body={profile.readingGoal} />
                 )}
                 {profile.notes.length > 0 && (
                   <div className="rounded-md bg-surface px-3 py-2">
-                    <p className="mb-1 text-xs font-semibold text-ink-secondary">推荐策略</p>
+                    <p className="mb-1 text-xs font-semibold text-ink-secondary">画像备注</p>
                     <ul className="space-y-1 text-xs leading-5 text-ink-secondary">
                       {profile.notes.slice(0, 5).map((note, index) => (
                         <li key={`${note}-${index}`}>{note}</li>
@@ -619,76 +492,7 @@ export default function Compass() {
               {busy === "build-profile" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
               生成画像
             </button>
-            <div className="border-t border-border pt-3">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-semibold text-ink-secondary">学习权重</span>
-                <button
-                  onClick={resetModel}
-                  disabled={busy === "reset-model"}
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-ink-tertiary hover:bg-hover"
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  重置
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {weightedLabels.map((item) => (
-                  <div key={item.key} className="rounded-md bg-page px-2 py-1.5 text-xs">
-                    <span className="text-ink-secondary">{item.label}</span>
-                    <strong className="float-right text-ink">{item.weight}%</strong>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-2 text-xs text-ink-tertiary">已评分 {model.ratingCount}</p>
-            </div>
           </section>
-
-          <main className="flex min-w-0 flex-col gap-4">
-            <ActiveResult
-              item={active}
-              busy={busy}
-              onAnalyzePaper={analyzePaper}
-              onRate={rate}
-            />
-          </main>
-
-          <aside className="rounded-lg border border-border bg-surface p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-semibold">画像匹配队列</h2>
-              <span className="text-xs text-ink-tertiary">{queue.length} 篇</span>
-            </div>
-            <div className="space-y-2">
-              {queue.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-ink-tertiary">
-                  暂无推荐项
-                </div>
-              ) : (
-                queue.map((item) => (
-                  <button
-                    key={`${item.status}-${item.id}`}
-                    onClick={() => setActive(item)}
-                    className={`w-full rounded-lg border px-3 py-3 text-left transition ${
-                      active?.id === item.id
-                        ? "border-primary bg-primary-light"
-                        : "border-border bg-page hover:bg-hover"
-                    }`}
-                  >
-                    <div className="mb-1 flex items-start justify-between gap-2">
-                      <strong className="line-clamp-2 text-sm text-ink">{titleOf(item)}</strong>
-                      <span className="shrink-0 rounded-md bg-surface px-2 py-1 text-xs font-semibold text-primary">
-                        {Math.round(item.final_score)}
-                      </span>
-                    </div>
-                    <p className="line-clamp-2 text-xs text-ink-secondary">{item.recommendation.reason}</p>
-                    <div className="mt-2 flex items-center justify-between text-xs text-ink-tertiary">
-                      <span>{sourceLabel(item)}</span>
-                      <span>{item.user_rating ? `${item.user_rating} 星` : "未评分"}</span>
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          </aside>
         </div>
       </div>
     </div>
@@ -701,152 +505,5 @@ function ProfileParagraph({ title, body }: { title: string; body: string }) {
       <p className="mb-1 text-xs font-semibold text-ink-secondary">{title}</p>
       <p className="text-xs leading-5 text-ink-secondary">{body}</p>
     </div>
-  );
-}
-
-function ActiveResult({
-  item,
-  busy,
-  onAnalyzePaper,
-  onRate,
-}: {
-  item: CompassAnalysisResult | null;
-  busy: string | null;
-  onAnalyzePaper: (item: CompassAnalysisResult) => void;
-  onRate: (value: number) => void;
-}) {
-  if (!item) {
-    return (
-      <section className="rounded-lg border border-dashed border-border bg-surface px-6 py-14 text-center text-sm text-ink-tertiary">
-        选择推荐项或解析新材料
-      </section>
-    );
-  }
-  const isLibrary = item.status === "library";
-  return (
-    <section className="rounded-lg border border-border bg-surface">
-      <div className="border-b border-border p-4">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="rounded-md bg-primary-light px-2 py-1 text-xs font-semibold text-primary">
-            推荐 {Math.round(item.final_score)}
-          </span>
-          <span className="rounded-md bg-page px-2 py-1 text-xs text-ink-secondary">
-            {sourceLabel(item)}
-          </span>
-          {item.source_url && (
-            <a
-              href={item.source_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-primary hover:bg-primary-light"
-            >
-              <ExternalLink className="h-3 w-3" />
-              来源
-            </a>
-          )}
-        </div>
-        <h2 className="text-xl font-semibold leading-snug text-ink">{titleOf(item)}</h2>
-        <p className="mt-2 text-sm leading-6 text-ink-secondary">{summaryOf(item)}</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {isLibrary && (
-            <button
-              onClick={() => onAnalyzePaper(item)}
-              disabled={busy === `paper-${item.paper_id || item.id}`}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-primary/30 bg-primary-light px-3 text-sm font-medium text-primary disabled:opacity-60"
-            >
-              {busy === `paper-${item.paper_id || item.id}` ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <BookOpen className="h-4 w-4" />
-              )}
-              深度解析
-            </button>
-          )}
-          <div className="flex items-center gap-1">
-            {[1, 2, 3, 4, 5].map((value) => (
-              <button
-                key={value}
-                onClick={() => onRate(value)}
-                disabled={busy === `rate-${value}`}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-amber-500 hover:bg-amber-50 disabled:opacity-60"
-                title={`${value} 星`}
-              >
-                <Star
-                  className={`h-4 w-4 ${
-                    (item.user_rating || 0) >= value ? "fill-current" : ""
-                  }`}
-                />
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-      <div className="grid gap-4 p-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <div className="space-y-3">
-          {FACTOR_KEYS.map((key) => (
-            <FactorBar key={key} label={FACTOR_LABELS[key]} value={item.recommendation.factors[key]} />
-          ))}
-          <div className="rounded-lg bg-page p-3 text-sm leading-6 text-ink-secondary">
-            <CheckCircle2 className="mb-2 h-4 w-4 text-primary" />
-            {item.recommendation.reason}
-          </div>
-        </div>
-        <div className="min-w-0 space-y-4">
-          {(item.analysis_blocks || []).length > 0 ? (
-            item.analysis_blocks?.map((block, index) => <AnalysisBlock key={index} block={block} />)
-          ) : (
-            <div className="rounded-lg bg-page p-4 text-sm leading-6 text-ink-secondary">
-              {summaryOf(item)}
-            </div>
-          )}
-          {item.trace && item.trace.length > 0 && (
-            <div className="rounded-lg border border-border bg-page p-3">
-              <p className="mb-2 text-xs font-semibold text-ink-tertiary">Trace</p>
-              <ul className="space-y-1 text-xs text-ink-secondary">
-                {item.trace.slice(0, 6).map((line, index) => (
-                  <li key={`${line}-${index}`}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function FactorBar({ label, value }: { label: string; value: number }) {
-  const safeValue = Math.max(0, Math.min(100, Math.round(value || 0)));
-  return (
-    <div className="rounded-lg bg-page p-3">
-      <div className="mb-2 flex items-center justify-between text-xs">
-        <span className="font-medium text-ink-secondary">{label}</span>
-        <strong className="text-ink">{safeValue}</strong>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-border">
-        <div className="h-full rounded-full bg-primary" style={{ width: `${safeValue}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function AnalysisBlock({ block }: { block: CompassAnalysisBlock }) {
-  if (block.type === "image" && block.url) {
-    return (
-      <figure className="overflow-hidden rounded-lg border border-border bg-page">
-        <img src={block.url} alt={block.alt || block.caption || ""} className="max-h-[420px] w-full object-contain" />
-        {(block.caption || block.heading) && (
-          <figcaption className="border-t border-border px-3 py-2 text-sm text-ink-secondary">
-            {block.caption || block.heading}
-          </figcaption>
-        )}
-      </figure>
-    );
-  }
-  return (
-    <article className="rounded-lg bg-page p-4">
-      {block.heading && <h3 className="mb-2 text-base font-semibold text-ink">{block.heading}</h3>}
-      <p className="whitespace-pre-wrap text-sm leading-7 text-ink-secondary">{block.body}</p>
-    </article>
   );
 }
