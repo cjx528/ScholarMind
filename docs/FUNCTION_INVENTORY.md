@@ -160,66 +160,40 @@
 - LLM 不可用时应有降级结果或明确错误提示。
 - 空库时页面不崩溃，有清晰空状态。
 
-## 4. 论文收集与主题订阅
+## 4. 论文收集与主题归档
 
 入口：`/collect`
 
 具体功能：
 
-- 单源 arXiv 搜索入库：输入查询词、最大数量、排序方式、时间范围后抓取论文。
-- 多源搜索：同时搜索 arXiv、OpenReview、Semantic Scholar、OpenAlex、DBLP、bioRxiv。
-- 渠道建议：根据 query 自动建议适合使用的论文源。
-- 渠道勾选：用户可手动选择本次搜索使用哪些渠道。
-- 搜索结果展示：展示标题、作者、来源、摘要、链接和渠道统计。
-- 主题列表：查看全部主题订阅。
-- 新建主题：填写名称、关键词、描述、每日限制、自动精读数量、启停状态和渠道选择。
-- 编辑主题：修改主题基本信息、关键词、配额、抓取时间和渠道。
-- 启停主题：快速打开或关闭某个主题订阅。
-- 删除主题：删除不再追踪的主题。
-- 关键词建议：根据主题描述生成关键词建议。
-- 手动抓取主题：立即执行某个主题的抓取。
-- 抓取进度轮询：主题抓取过程中持续查询状态。
-- 抓取结果入库：抓到的论文写入本地论文库并关联主题。
-- 计算机学科订阅：查看 CS 分类，选择分类订阅，设置 daily limit。
-- 学科订阅启停：对某个 CS 分类启用、停用或删除。
-- 学科订阅手动抓取：立即抓取某个 CS 分类的最新论文。
-- 抓取行动记录：在论文库侧边栏可按行动记录查看本次抓取到的论文。
+- 统一搜索：即时搜索和多源搜索合并为一个入口。
+- 来源选择：用户可选择 arXiv、OpenReview、Semantic Scholar、OpenAlex、DBLP、bioRxiv。
+- 新旧偏好：默认排序和时间窗口参考用户画像里的新论文/旧论文比例偏好。
+- 候选预览：搜索结果先展示标题、作者、来源、日期、摘要、链接、相关性分数和是否已入库。
+- 主题归类：候选论文会预判所属主题；没有匹配主题时按搜索词生成主题名称。
+- 人工确认：只有用户勾选并确认后，候选论文才写入本地论文库。
+- 按主题入库：确认入库时自动关联到对应主题库；新建主题默认暂停，不会自动抓取。
+- 来源统计：展示各论文源的返回数量、去重数量和失败信息。
+- 抓取行动记录：入库动作会形成记录，论文库可按行动记录查看对应论文。
 
 主要接口和文件：
 
 - `GET /topics`
-- `POST /topics`
-- `PATCH /topics/{topic_id}`
-- `DELETE /topics/{topic_id}`
-- `POST /topics/suggest-keywords`
-- `POST /topics/{topic_id}/fetch`
-- `GET /topics/{topic_id}/fetch-status`
-- `POST /ingest/arxiv`
-- `POST /papers/search-multi`
-- `GET /papers/suggest-channels`
-- `GET /cs/categories`
-- `GET /cs/feeds`
-- `POST /cs/feeds`
-- `PATCH /cs/feeds/{category_code}`
-- `DELETE /cs/feeds/{category_code}`
-- `POST /cs/feeds/{category_code}/fetch`
+- `POST /ingest/search/preview`
+- `POST /ingest/search/selected`
+- `POST /ingest/arxiv/preview`
+- `POST /ingest/arxiv/selected`
 - `frontend/src/pages/Collect.tsx`
-- `frontend/src/pages/CSFeeds.tsx`
-- `frontend/src/components/search/MultiSourceSearchBar.tsx`
-- `frontend/src/components/search/SearchResultsList.tsx`
-- `frontend/src/components/topics/TopicChannelSelector.tsx`
 - `packages/integrations/`
 
 验收重点：
 
-- arXiv 查询能成功入库，且论文库能看到新论文。
-- OpenReview 查询能返回结果或给出明确失败提示。
-- 多源搜索结果能区分来源，渠道统计不为空。
-- 新建主题后能保存关键词、渠道、配额和启停状态。
-- 编辑主题后刷新页面仍保持修改。
-- 主题手动抓取时按钮进入 loading，完成后显示新增数量。
-- CS 分类订阅能创建、修改 daily limit、手动抓取和删除。
-- 网络或外部 API 失败时，页面不应只显示空白。
+- 搜索前可以选择论文来源，至少 arXiv 能返回候选。
+- 搜索结果能区分来源，渠道统计不为空。
+- 候选论文不会自动入库，必须勾选并确认。
+- 候选能显示预判主题，确认入库后在论文详情或主题筛选中能看到关联。
+- 已入库论文会显示已在库，不应被误判为新论文。
+- 外部渠道、网络或 API 失败时显示可读错误，不应只有空白。
 
 ## 5. 论文库
 
@@ -378,7 +352,8 @@
 - 全库问答：`/rag/ask` 根据本地论文库回答问题。
 - 单篇论文 Wiki：按论文生成结构化 Wiki 内容。
 - 主题 Wiki：输入关键词生成主题级 Wiki。
-- 异步主题 Wiki：长任务通过任务系统生成并轮询状态。
+- 异步 Wiki：主题 Wiki 和论文 Wiki 都通过任务系统生成并轮询状态。
+- 并行生成：主题 Wiki 与论文 Wiki 可以同时生成，页面分别保留进度。
 - 热点趋势：获取热门趋势和新兴趋势。
 - 生成内容历史：查看已生成的 Wiki 等内容。
 - 内容详情：点击历史项查看完整内容。
@@ -390,6 +365,7 @@
 - `GET /wiki/paper/{paper_id}`
 - `GET /wiki/topic`
 - `POST /tasks/wiki/topic`
+- `POST /tasks/wiki/paper/{paper_id}`
 - `GET /trends/hot`
 - `GET /trends/emerging`
 - `GET /generated/list`
@@ -403,7 +379,8 @@
 验收重点：
 
 - 全库问答能引用本地论文信息，不应完全脱离论文库。
-- 主题 Wiki 生成任务可显示进度，完成后可查看结果。
+- 主题 Wiki 和论文 Wiki 生成任务都可显示进度，完成后可查看结果。
+- 主题 Wiki 和论文 Wiki 同时生成时互不覆盖任务状态。
 - 历史内容列表可打开详情和删除。
 - 空库时应提示先收集论文，而不是生成虚假内容。
 

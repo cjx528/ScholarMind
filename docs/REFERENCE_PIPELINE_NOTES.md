@@ -10,7 +10,7 @@
 
 - 每天自动生成研究雷达。
 - 将候选论文分成精读候选、速读候选和跳过原因。
-- 将主题订阅升级成更接近 query profile 的结构。
+- 将主题归档升级成更接近 query profile 的结构。
 - 让论文解析结果可以继续追问。
 
 ## 推荐发现流水线
@@ -26,7 +26,7 @@
 
 当前代码已有研究雷达和多源收集基础，后续可以逐步补强召回融合和重排解释。
 
-## 主题订阅升级方向
+## 主题归档升级方向
 
 一个主题不应该只是关键词列表。更合理的 query profile 应包含：
 
@@ -34,16 +34,13 @@
 - 关键词。
 - 意图 query。
 - 论文源选择。
-- 启停状态。
 - 最近运行结果。
 - 推荐反馈统计。
 
 当前相关代码：
 
 - `frontend/src/pages/Collect.tsx`
-- `frontend/src/contexts/ChannelContext.tsx`
 - `apps/api/routers/topics.py`
-- `packages/ai/daily_runner.py`
 - `packages/integrations/`
 
 ## 阅读助手升级方向

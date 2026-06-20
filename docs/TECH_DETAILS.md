@@ -53,20 +53,19 @@
 
 1. 用户在 `/recommendation` 填写研究方向、关键词和偏好。
 2. 后端保存到推荐画像。
-3. `/collect` 的主题订阅按关键词和渠道抓取论文。
-4. `packages/integrations/aggregator.py` 与各渠道客户端返回候选论文。
-5. `packages/ai/daily_radar_service.py` 生成研究雷达分区。
-6. 用户反馈通过 `/recommendation/feedback` 影响后续排序。
+3. `/collect` 选择论文源并发起统一多源搜索。
+4. `apps/api/routers/topics.py` 调用 `packages/integrations/aggregator.py` 与各渠道客户端返回候选论文。
+5. 候选论文先按相关性和主题归类展示，用户确认后通过 `/ingest/search/selected` 入库并关联主题。
+6. `packages/ai/daily_radar_service.py` 生成研究雷达分区。
+7. 用户反馈通过 `/recommendation/feedback` 影响后续排序。
 
 相关文件：
 
 - `frontend/src/pages/Compass.tsx`
 - `frontend/src/pages/DailyRadar.tsx`
 - `frontend/src/pages/Collect.tsx`
-- `frontend/src/contexts/ChannelContext.tsx`
 - `apps/api/routers/recommendation.py`
 - `apps/api/routers/topics.py`
-- `apps/api/routers/cs_feeds.py`
 - `packages/ai/compass_service.py`
 - `packages/ai/daily_radar_service.py`
 - `packages/ai/daily_runner.py`
@@ -141,6 +140,7 @@
 - `GET /wiki/paper/{paper_id}`：单篇论文 Wiki。
 - `GET /wiki/topic`：主题 Wiki。
 - `POST /tasks/wiki/topic`：异步生成主题 Wiki。
+- `POST /tasks/wiki/paper/{paper_id}`：异步生成单篇论文 Wiki。
 - `GET /generated/list`：查看生成内容。
 
 相关文件：

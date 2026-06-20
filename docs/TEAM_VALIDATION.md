@@ -45,7 +45,7 @@
 - 推荐反馈如何影响排序。
 - 研究雷达如何帮助用户每天决定读什么。
 
-## B：论文收集、主题订阅、多源渠道、OpenReview、学科订阅
+## B：论文收集、多源搜索、主题归档、OpenReview
 
 负责页面：
 
@@ -53,33 +53,19 @@
 
 需要逐项检查：
 
-- arXiv 单源搜索能输入 query、最大数量、排序和时间范围，并把论文写入本地库。
-- 多源搜索能选择 arXiv、OpenReview、Semantic Scholar、OpenAlex、DBLP、bioRxiv。
-- 多源结果能显示来源、标题、作者、摘要、链接和渠道统计。
-- 渠道建议能根据 query 返回建议渠道，用户也能手动改选。
+- 统一搜索能输入 query、最大数量、排序和时间范围。
+- 搜索时能选择 arXiv、OpenReview、Semantic Scholar、OpenAlex、DBLP、bioRxiv。
+- 结果先作为候选展示，能显示来源、标题、作者、摘要、链接、相关性和渠道统计。
+- 候选论文不会直接入库，必须勾选并确认。
+- 确认入库后，论文能进入本地论文库并关联到预判主题。
+- 用户画像里的新旧论文偏好能影响默认时间窗口和排序。
 - 外部渠道失败时显示可读错误，不应只有空列表或未捕获异常。
-- 主题列表能加载已有主题，显示名称、关键词、描述、启停状态、配额和最近抓取信息。
-- 新建主题能保存名称、关键词、描述、每日限制、自动精读数量、抓取时间、渠道和启停状态。
-- 编辑主题后刷新页面，修改后的字段仍存在。
-- 主题启停按钮能改变状态，并影响后续抓取。
-- 删除主题后列表刷新，相关按钮状态正确。
-- 关键词建议能根据主题描述返回可用关键词。
-- 手动抓取主题时按钮进入 loading，抓取结束后显示新增数量或明确失败原因。
-- 抓取状态轮询过程中不重复提交，也不导致页面卡死。
-- CS 分类订阅能展示分类列表。
-- CS 分类能创建订阅、修改 daily limit、启停、删除和手动抓取。
 - 抓取产生的行动记录能在论文库按行动记录查看。
 
 主要文件：
 
 - `frontend/src/pages/Collect.tsx`
-- `frontend/src/pages/CSFeeds.tsx`
-- `frontend/src/components/search/MultiSourceSearchBar.tsx`
-- `frontend/src/components/search/SearchResultsList.tsx`
-- `frontend/src/components/topics/TopicChannelSelector.tsx`
-- `frontend/src/contexts/ChannelContext.tsx`
 - `apps/api/routers/topics.py`
-- `apps/api/routers/cs_feeds.py`
 - `apps/api/routers/papers.py`
 - `packages/ai/daily_runner.py`
 - `packages/ai/pipelines.py`
@@ -96,7 +82,7 @@
 建议报告内容：
 
 - 多源渠道为什么比单一 arXiv 更适合每日发现。
-- 主题订阅的数据结构和抓取流程。
+- 候选审核、主题归类和确认入库流程。
 - OpenReview 接入方式和失败降级策略。
 
 ## C：论文库、论文详情、PDF 阅读助手、解析与 RAG
@@ -184,6 +170,7 @@
 - Agent 返回论文结果卡片时能跳到论文详情。
 - Wiki 能生成单篇论文 Wiki。
 - Wiki 能按关键词生成主题 Wiki，并支持异步任务进度。
+- 主题 Wiki 和论文 Wiki 同时生成时，两个进度不互相覆盖。
 - Wiki 历史记录能打开详情和删除。
 - 设置页能选择 AI 后端，配置 Codex CLI 路径和超时。
 - LLM Provider 能新增、编辑、激活、停用、删除。
