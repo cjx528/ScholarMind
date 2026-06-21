@@ -69,6 +69,43 @@ export interface ConversationSeed {
   messages?: ConversationSeedMessage[];
 }
 
+const RETIRED_D_PART_CONVERSATION_MARKERS = [
+  "ScholarMind D 部分验收",
+  "我负责完成 ScholarMind 的 D 部分",
+  "这是 ScholarMind D 部分专用工作对话",
+];
+
+function isRetiredDPartConversation(meta: ConversationMeta, conv: Conversation | null): boolean {
+  if (RETIRED_D_PART_CONVERSATION_MARKERS.some((marker) => meta.title.includes(marker))) {
+    return true;
+  }
+  return Boolean(
+    conv?.messages?.some((message) =>
+      RETIRED_D_PART_CONVERSATION_MARKERS.some((marker) => message.content.includes(marker)),
+    ),
+  );
+}
+
+function pruneRetiredDPartConversations(metas: ConversationMeta[]): ConversationMeta[] {
+  const kept: ConversationMeta[] = [];
+  let changed = false;
+  const activeId = localStorage.getItem(ACTIVE_KEY);
+
+  for (const meta of metas) {
+    const conv = loadConversation(meta.id);
+    if (isRetiredDPartConversation(meta, conv)) {
+      removeConversation(meta.id);
+      if (activeId === meta.id) localStorage.removeItem(ACTIVE_KEY);
+      changed = true;
+    } else {
+      kept.push(meta);
+    }
+  }
+
+  if (changed) saveMetas(kept);
+  return kept;
+}
+
 /**
  * 从 localStorage 加载对话列表（仅元信息）
  */
@@ -76,7 +113,7 @@ function loadMetas(): ConversationMeta[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY + "_index");
     if (!raw) return [];
-    return JSON.parse(raw);
+    return pruneRetiredDPartConversations(JSON.parse(raw));
   } catch {
     return [];
   }
@@ -90,7 +127,7 @@ export function loadConversation(id: string): Conversation | null {
   try {
     const raw = localStorage.getItem(`${STORAGE_KEY}_${id}`);
     if (!raw) return null;
-    return JSON.parse(raw);
+    return pruneRetiredDPartConversations(JSON.parse(raw));
   } catch {
     return null;
   }

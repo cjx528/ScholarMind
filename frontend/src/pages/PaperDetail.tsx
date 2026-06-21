@@ -1170,7 +1170,7 @@ export default function PaperDetail() {
           {/* Tab: 精读 */}
           {reportTab === "deep" && (
             <div className="animate-fade-in">
-              {deepLoading ? null : savedDeep && !deepReport ? (
+              {deepLoading && !savedDeep && !deepReport ? null : savedDeep && !deepReport ? (
                 <Card className="rounded-2xl border-blue-500/20">
                   <CardHeader title="精读报告" />
                   <div className="space-y-6">
