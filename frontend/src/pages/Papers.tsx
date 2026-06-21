@@ -204,6 +204,7 @@ export default function Papers() {
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState("#3b82f6");
   const [tagsLoading, setTagsLoading] = useState(false);
+  const [deleteTagTarget, setDeleteTagTarget] = useState<TagType | null>(null);
 
   useEffect(() => {
     clearTimeout(searchTimerRef.current);
@@ -363,33 +364,38 @@ export default function Papers() {
       setNewTagName("");
       setNewTagColor("#3b82f6");
       await loadTags();
-    } catch (e: unknown) {
+    } catch {
       toast("error", editingTag ? "更新标签失败" : "创建标签失败");
     }
   }, [newTagName, newTagColor, editingTag, loadTags, toast]);
 
   /* 删除标签 */
-  const handleDeleteTag = useCallback(
-    async (tag: TagType) => {
-      const count = tag.paper_count ?? 0;
-      const warn =
-        count > 0
-          ? `确定要删除标签 "${tag.name}" 吗？\n将同时移除 ${count} 篇论文上的该标签。`
-          : `确定要删除标签 "${tag.name}" 吗？`;
-      if (!window.confirm(warn)) {
-        return;
-      }
-      try {
-        await tagApi.delete(tag.id);
-        toast("success", `标签 "${tag.name}" 已删除`);
-        setActiveTagIds((prev) => prev.filter((id) => id !== tag.id));
-        await loadTags();
-      } catch {
-        toast("error", "删除标签失败");
-      }
-    },
-    [loadTags, toast]
-  );
+  const handleConfirmDeleteTag = useCallback(async () => {
+    if (!deleteTagTarget) return;
+    try {
+      await tagApi.delete(deleteTagTarget.id);
+      toast("success", `标签 "${deleteTagTarget.name}" 已删除`);
+      setActiveTagIds((prev) => {
+        const next = prev.filter((id) => id !== deleteTagTarget.id);
+        if (next.length !== prev.length) setPage(1);
+        return next;
+      });
+      setPapers((prev) =>
+        prev.map((paper) =>
+          paper.tags?.some((tag) => tag.id === deleteTagTarget.id)
+            ? {
+                ...paper,
+                tags: paper.tags.filter((tag) => tag.id !== deleteTagTarget.id),
+              }
+            : paper
+        )
+      );
+      setDeleteTagTarget(null);
+      await loadTags();
+    } catch {
+      toast("error", "删除标签失败");
+    }
+  }, [deleteTagTarget, loadTags, toast]);
 
   /* 切换标签筛选 */
   const toggleTagFilter = useCallback(
@@ -515,7 +521,11 @@ export default function Papers() {
   const toggleSelect = useCallback((id: string) => {
     setSelected((prev) => {
       const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
+      if (n.has(id)) {
+        n.delete(id);
+      } else {
+        n.add(id);
+      }
       return n;
     });
   }, []);
@@ -996,19 +1006,20 @@ export default function Papers() {
                       {tags.map((tag) => {
                         const isActive = activeTagIds.includes(tag.id);
                         return (
-                          <div key={tag.id} className="group relative">
+                          <div
+                            key={tag.id}
+                            className={`inline-flex max-w-full items-center overflow-hidden rounded-md text-[11px] transition-all ${
+                              isActive ? "ring-2 ring-offset-1" : "hover:opacity-90"
+                            }`}
+                            style={{
+                              backgroundColor: isActive ? tag.color : `${tag.color}20`,
+                              color: isActive ? "white" : tag.color,
+                              boxShadow: isActive ? `0 0 0 2px ${tag.color}` : "none",
+                            }}
+                          >
                             <button
                               onClick={() => toggleTagFilter(tag.id)}
-                              className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-all ${
-                                isActive
-                                  ? "ring-2 ring-offset-1"
-                                  : "hover:opacity-80"
-                              }`}
-                              style={{
-                                backgroundColor: isActive ? tag.color : `${tag.color}20`,
-                                color: isActive ? "white" : tag.color,
-                                boxShadow: isActive ? `0 0 0 2px ${tag.color}` : "none",
-                              }}
+                              className="inline-flex min-w-0 flex-1 items-center gap-1 px-2 py-1"
                             >
                               <span className="max-w-24 truncate">{tag.name}</span>
                               <span
@@ -1019,8 +1030,9 @@ export default function Papers() {
                                 ({tag.paper_count || 0})
                               </span>
                             </button>
-                            <div className="absolute -right-1 -top-1 hidden gap-0.5 rounded-full bg-white shadow-sm group-hover:flex">
+                            <div className="flex shrink-0 items-center gap-0.5 pr-1">
                               <button
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setEditingTag(tag);
@@ -1028,20 +1040,31 @@ export default function Papers() {
                                   setNewTagColor(tag.color);
                                   setTagModalOpen(true);
                                 }}
-                                className="text-ink-tertiary hover:text-primary rounded-full p-0.5"
+                                className={`rounded p-0.5 transition-colors ${
+                                  isActive
+                                    ? "text-white/75 hover:bg-white/15 hover:text-white"
+                                    : "opacity-70 hover:bg-white hover:opacity-100"
+                                }`}
                                 title="编辑标签"
+                                aria-label={`编辑标签 ${tag.name}`}
                               >
-                                <Edit2 className="h-2.5 w-2.5" />
+                                <Edit2 className="h-3 w-3" />
                               </button>
                               <button
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleDeleteTag(tag);
+                                  setDeleteTagTarget(tag);
                                 }}
-                                className="text-ink-tertiary hover:text-error rounded-full p-0.5"
+                                className={`rounded p-0.5 transition-colors ${
+                                  isActive
+                                    ? "text-white/75 hover:bg-white/15 hover:text-white"
+                                    : "opacity-70 hover:bg-white hover:text-error hover:opacity-100"
+                                }`}
                                 title="删除标签"
+                                aria-label={`删除标签 ${tag.name}`}
                               >
-                                <Trash2 className="h-2.5 w-2.5" />
+                                <Trash2 className="h-3 w-3" />
                               </button>
                             </div>
                           </div>
@@ -1459,6 +1482,22 @@ export default function Papers() {
         variant="danger"
         onConfirm={handleConfirmDeletePaper}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTagTarget}
+        title="删除标签"
+        description={
+          deleteTagTarget
+            ? deleteTagTarget.paper_count && deleteTagTarget.paper_count > 0
+              ? `将删除标签「${deleteTagTarget.name}」，并从 ${deleteTagTarget.paper_count} 篇论文上移除该标签。论文本身不会被删除。`
+              : `将删除标签「${deleteTagTarget.name}」。论文本身不会被删除。`
+            : undefined
+        }
+        confirmLabel="删除标签"
+        variant="danger"
+        onConfirm={handleConfirmDeleteTag}
+        onCancel={() => setDeleteTagTarget(null)}
       />
 
       <TagModal

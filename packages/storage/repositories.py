@@ -936,11 +936,16 @@ class TagRepository:
         self.session.flush()
         return tag
 
-    def delete(self, tag_id: str) -> None:
+    def delete(self, tag_id: str) -> int:
         """删除标签"""
         tag = self.get_by_id(tag_id)
-        if tag is not None:
-            self.session.delete(tag)
+        if tag is None:
+            return 0
+        paper_count = self.get_paper_count(tag_id)
+        self.session.execute(delete(PaperTag).where(PaperTag.tag_id == tag_id))
+        self.session.delete(tag)
+        self.session.flush()
+        return paper_count
 
     def get_paper_count(self, tag_id: str) -> int:
         """获取标签关联的论文数量"""

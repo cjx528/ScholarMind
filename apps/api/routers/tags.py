@@ -88,8 +88,9 @@ def delete_tag(tag_id: UUID) -> dict:
         tag = repo.get_by_id(str(tag_id))
         if tag is None:
             raise HTTPException(status_code=404, detail="标签不存在")
-        repo.delete(str(tag_id))
-        return {"deleted": str(tag_id), "name": tag.name}
+        tag_name = tag.name
+        paper_count = repo.delete(str(tag_id))
+        return {"deleted": str(tag_id), "name": tag_name, "paper_count": paper_count}
 
 
 @router.get("/papers/{paper_id}/tags")

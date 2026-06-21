@@ -267,7 +267,8 @@ export const tagApi = {
     if (data.color) params.append("color", data.color);
     return patch<Tag>(`/tags/${id}?${params}`);
   },
-  delete: (id: string) => del<{ deleted: string; name: string }>(`/tags/${id}`),
+  delete: (id: string) =>
+    del<{ deleted: string; name: string; paper_count: number }>(`/tags/${id}`),
   getPaperTags: (paperId: string) => get<{ items: Tag[] }>(`/papers/${paperId}/tags`),
   addPaperTag: (paperId: string, tagId: string) =>
     post<{ paper_id: string; tag: Tag }>(`/papers/${paperId}/tags?tag_id=${tagId}`),
