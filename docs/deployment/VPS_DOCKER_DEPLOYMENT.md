@@ -47,22 +47,21 @@ docker --version
 docker compose version
 ```
 
-## 2. Prepare the deploy folder
+## 2. Clone the project on the server
 
-Create one folder on the server:
+Install Git if needed:
 
 ```bash
-mkdir -p ~/scholarmind
-cd ~/scholarmind
+sudo apt-get update
+sudo apt-get install -y git
 ```
 
-Download these three files from the GitHub repository:
+Clone the repository:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/cjx528/ScholarMind/main/deploy/docker-compose.server.yml
-curl -fsSLO https://raw.githubusercontent.com/cjx528/ScholarMind/main/deploy/docker-compose.server-domain.yml
-curl -fsSLO https://raw.githubusercontent.com/cjx528/ScholarMind/main/deploy/Caddyfile
-curl -fsSLo .env.server https://raw.githubusercontent.com/cjx528/ScholarMind/main/deploy/.env.server.example
+git clone https://github.com/cjx528/ScholarMind.git
+cd ScholarMind/deploy
+cp .env.server.example .env.server
 ```
 
 Edit `.env.server`:
@@ -91,8 +90,7 @@ openssl rand -hex 32
 Use this when you do not have a domain name yet:
 
 ```bash
-docker compose --env-file .env.server -f docker-compose.server.yml pull
-docker compose --env-file .env.server -f docker-compose.server.yml up -d
+docker compose --env-file .env.server -f docker-compose.server-build.yml up -d --build
 ```
 
 Open:
@@ -114,8 +112,7 @@ PUBLIC_ORIGIN=https://scholarmind.example.com
 Start:
 
 ```bash
-docker compose --env-file .env.server -f docker-compose.server-domain.yml pull
-docker compose --env-file .env.server -f docker-compose.server-domain.yml up -d
+docker compose --env-file .env.server -f docker-compose.server-build-domain.yml up -d --build
 ```
 
 Open:
@@ -132,28 +129,32 @@ Caddy obtains and renews HTTPS certificates automatically.
 Check status:
 
 ```bash
-docker compose --env-file .env.server -f docker-compose.server.yml ps
+docker compose --env-file .env.server -f docker-compose.server-build.yml ps
 docker logs -f scholarmind-web
 ```
 
 For the domain compose file, replace the first command with:
 
 ```bash
-docker compose --env-file .env.server -f docker-compose.server-domain.yml ps
+docker compose --env-file .env.server -f docker-compose.server-build-domain.yml ps
 ```
 
-Update to the newest image:
+Update to the newest code:
 
 ```bash
-docker compose --env-file .env.server -f docker-compose.server.yml pull
-docker compose --env-file .env.server -f docker-compose.server.yml up -d
+cd ~/ScholarMind
+git pull
+cd deploy
+docker compose --env-file .env.server -f docker-compose.server-build.yml up -d --build
 ```
 
 For domain mode:
 
 ```bash
-docker compose --env-file .env.server -f docker-compose.server-domain.yml pull
-docker compose --env-file .env.server -f docker-compose.server-domain.yml up -d
+cd ~/ScholarMind
+git pull
+cd deploy
+docker compose --env-file .env.server -f docker-compose.server-build-domain.yml up -d --build
 ```
 
 Backup persistent data:

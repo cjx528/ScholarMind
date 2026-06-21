@@ -13,8 +13,8 @@ the VPS Docker guide:
 docs/deployment/VPS_DOCKER_DEPLOYMENT.md
 ```
 
-That path runs the published Docker image on your own server. The final link is
-either:
+That path builds and runs the Docker service on your own server. The final link
+is either:
 
 ```text
 http://SERVER_IP/
