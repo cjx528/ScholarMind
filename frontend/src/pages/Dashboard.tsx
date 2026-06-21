@@ -54,7 +54,7 @@ const PIPELINE_LABELS: Record<string, string> = {
   deep_dive: "深度精读",
   embed_paper: "向量化",
   ingest_arxiv: "arXiv 收集",
-  ingest_arxiv_with_ids: "订阅收集",
+  ingest_arxiv_with_ids: "主题收集",
   daily_graph_maintenance: "图维护",
 };
 
@@ -168,7 +168,7 @@ export default function Dashboard() {
         />
         <StatCard
           icon={<BookOpen className="h-5 w-5" />}
-          label="主题订阅"
+          label="主题库"
           value={status?.counts?.enabled_topics ?? 0}
           sub="已启用主题"
           color="info"

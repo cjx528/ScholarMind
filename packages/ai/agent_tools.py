@@ -1,4 +1,4 @@
-"""
+﻿"""
 Agent 工具注册表和执行函数
 @author ScholarMind Team
 """
@@ -155,7 +155,7 @@ TOOL_REGISTRY: list[ToolDef] = [
     ),
     ToolDef(
         name="list_topics",
-        description="列出所有主题订阅",
+        description="列出所有主题库",
         parameters={"type": "object", "properties": {}},
         requires_confirm=False,
     ),
@@ -268,34 +268,7 @@ TOOL_REGISTRY: list[ToolDef] = [
         },
         requires_confirm=True,
     ),
-    ToolDef(
-        name="manage_subscription",
-        description="管理主题订阅：启用/禁用、设置频率和时间",
-        parameters={
-            "type": "object",
-            "properties": {
-                "topic_name": {
-                    "type": "string",
-                    "description": "主题名称",
-                },
-                "enabled": {
-                    "type": "boolean",
-                    "description": "true=启用定时搜集，false=关闭",
-                },
-                "schedule_frequency": {
-                    "type": "string",
-                    "enum": ["daily", "twice_daily", "weekdays", "weekly"],
-                    "description": "搜集频率：每天/每天两次/工作日/每周",
-                },
-                "schedule_time_beijing": {
-                    "type": "integer",
-                    "description": "北京时间执行小时（0-23），默认 5 点",
-                },
-            },
-            "required": ["topic_name", "enabled"],
-        },
-        requires_confirm=True,
-    ),
+
     ToolDef(
         name="suggest_keywords",
         description="根据用户自然语言描述，AI 生成 arXiv 搜索关键词建议",
@@ -358,7 +331,6 @@ def _get_tool_handlers() -> dict:
         "deep_read_paper": _deep_read_paper,
         "embed_paper": _embed_paper,
         "generate_wiki": _generate_wiki,
-        "manage_subscription": _manage_subscription,
         "suggest_keywords": _suggest_keywords,
         "reasoning_analysis": _reasoning_analysis,
     }
@@ -614,7 +586,7 @@ def _list_topics() -> ToolResult:
         return ToolResult(
             success=True,
             data={"topics": items, "count": len(items)},
-            summary=f"共 {len(items)} 个主题（{enabled} 个已订阅）: {names}{suffix}",
+            summary=f"共 {len(items)} 个主题: {names}{suffix}",
         )
     except Exception as exc:
         logger.exception("list_topics failed: %s", exc)
@@ -887,7 +859,6 @@ def _ingest_arxiv(
             data={
                 "ingested": 0,
                 "query": query,
-                "suggest_subscribe": False,
                 "failed": failed_papers,
             },
             summary="未能入库任何论文"
@@ -983,7 +954,6 @@ def _ingest_arxiv(
             "query": query,
             "topic": topic_name,
             "paper_ids": inserted_ids[:10],
-            "suggest_subscribe": is_new_topic,
             "ingested": ingested_papers,
             "failed": failed_papers,
         },
@@ -994,52 +964,6 @@ def _ingest_arxiv(
         ),
     )
 
-
-def _manage_subscription(
-    topic_name: str,
-    enabled: bool,
-    schedule_frequency: str | None = None,
-    schedule_time_beijing: int | None = None,
-) -> ToolResult:
-    """管理主题订阅：启用/禁用、设置频率和时间"""
-    freq_map = {
-        "daily": "每天",
-        "twice_daily": "每天两次",
-        "weekdays": "工作日",
-        "weekly": "每周",
-    }
-    with session_scope() as session:
-        topic_repo = TopicRepository(session)
-        topic = topic_repo.get_by_name(topic_name.strip())
-        if not topic:
-            return ToolResult(
-                success=False,
-                summary=f"主题「{topic_name}」不存在",
-            )
-        topic.enabled = enabled
-        if schedule_frequency and schedule_frequency in freq_map:
-            topic.schedule_frequency = schedule_frequency
-        if schedule_time_beijing is not None:
-            utc_hour = (schedule_time_beijing - 8) % 24
-            topic.schedule_time_utc = max(0, min(23, utc_hour))
-
-        freq_label = freq_map.get(topic.schedule_frequency, topic.schedule_frequency)
-        bj_hour = (topic.schedule_time_utc + 8) % 24
-        action = "启用定时搜集" if enabled else "关闭定时搜集"
-        schedule_info = f"（{freq_label} · 北京时间 {bj_hour:02d}:00）"
-
-    return ToolResult(
-        success=True,
-        data={
-            "topic": topic_name,
-            "enabled": enabled,
-            "schedule_frequency": schedule_frequency or "daily",
-            "schedule_time_beijing": (
-                schedule_time_beijing if schedule_time_beijing is not None else 5
-            ),
-        },
-        summary=f"已{action}：{topic_name} {schedule_info}",
-    )
 
 
 def _suggest_keywords(description: str) -> ToolResult:

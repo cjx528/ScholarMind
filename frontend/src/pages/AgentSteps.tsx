@@ -346,7 +346,7 @@ const StepDataView = memo(function StepDataView({ data, toolName }: { data: Reco
             {t.paper_count !== undefined && <span className="text-ink-tertiary">{String(t.paper_count)} 篇</span>}
             {t.enabled !== undefined && (
               <span className={cn("ml-auto rounded px-1.5 py-0.5 text-[9px]", t.enabled ? "bg-success/10 text-success" : "bg-ink/5 text-ink-tertiary")}>
-                {t.enabled ? "已订阅" : "未订阅"}
+                {t.enabled ? "已启用" : "已停用"}
               </span>
             )}
           </div>

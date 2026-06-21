@@ -157,7 +157,6 @@ from apps.api.routers import (  # noqa: E402
     agent,
     auth,
     content,
-    cs_feeds,
     jobs,
     llm_configs,
     papers,
@@ -177,7 +176,6 @@ app.include_router(papers.router)
 app.include_router(recommendation.router)
 app.include_router(topics.router)
 app.include_router(tags.router)
-app.include_router(cs_feeds.router)
 app.include_router(agent.router)
 app.include_router(content.router)
 app.include_router(pipelines.router)

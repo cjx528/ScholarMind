@@ -1,7 +1,7 @@
 """add tags table
 
 Revision ID: 20260415_0001
-Revises: b1d72ad8a6ed
+Revises: 20260317_0012
 Create Date: 2026-04-15 00:00:00.000000
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "20260415_0001"
-down_revision = "b1d72ad8a6ed"
+down_revision = "20260317_0012"
 branch_labels = None
 depends_on = None
 

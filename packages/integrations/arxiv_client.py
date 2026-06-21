@@ -74,7 +74,7 @@ class ArxivClient:
         """sort_by: submittedDate(最新) / relevance(相关性) / lastUpdatedDate
 
         days_back 默认 0 = 不加日期过滤（否则经典老论文如 OpenShape/Uni3D 都会被筛掉）。
-        订阅/定时任务需要最新增量时，由调用方显式传 days_back。
+        需要最新增量时，由调用方显式传 days_back。
         """
         # 获取速率限制许可（10 秒超时）
         if not acquire_api("arxiv", timeout=10.0):

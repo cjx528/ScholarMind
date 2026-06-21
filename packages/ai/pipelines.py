@@ -1,4 +1,4 @@
-"""
+﻿"""
 论文处理 Pipeline - 摄入 / 粗读 / 精读 / 向量化 / 参考文献导入
 @author ScholarMind Team
 """
@@ -292,7 +292,7 @@ class PaperPipelines:
         query: str,
         max_results: int = 20,
         topic_id: str | None = None,
-        action_type: ActionType = ActionType.subscription_ingest,
+        action_type: ActionType = ActionType.manual_collect,
         sort_by: str = "submittedDate",
         days_back: int = 7,
         progress_callback: callable | None = None,
@@ -314,7 +314,7 @@ class PaperPipelines:
         query: str,
         max_results: int = 20,
         topic_id: str | None = None,
-        action_type: ActionType = ActionType.subscription_ingest,
+        action_type: ActionType = ActionType.manual_collect,
         sort_by: str = "submittedDate",
         days_back: int = 7,
         progress_callback: callable | None = None,
@@ -403,7 +403,7 @@ class PaperPipelines:
         query: str,
         max_results: int = 20,
         topic_id: str | None = None,
-        action_type: ActionType = ActionType.subscription_ingest,
+        action_type: ActionType = ActionType.manual_collect,
     ) -> dict:
         total_count, inserted_ids, new_count = self.ingest_openreview(
             query=query,

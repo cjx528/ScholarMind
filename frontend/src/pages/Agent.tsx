@@ -51,7 +51,6 @@ const TOOL_META: Record<string, { icon: typeof Search; label: string }> = {
   deep_read_paper: { icon: BookOpen, label: "精读论文" },
   embed_paper: { icon: Brain, label: "向量嵌入" },
   generate_wiki: { icon: FileText, label: "生成 Wiki" },
-  manage_subscription: { icon: BookOpen, label: "订阅管理" },
 };
 
 function getToolMeta(name: string) {
@@ -470,8 +469,6 @@ const IngestResultView = memo(function IngestResultView({
     ? (data.ingested as Array<Record<string, unknown>>)
     : [];
   const failed = Array.isArray(data.failed) ? (data.failed as Array<Record<string, unknown>>) : [];
-  const suggestSub = !!data.suggest_subscribe;
-
   return (
     <div className="space-y-2.5">
       {/* 统计条 */}
@@ -506,11 +503,6 @@ const IngestResultView = memo(function IngestResultView({
           <span className="bg-primary/10 text-primary rounded-md px-1.5 py-0.5 font-medium">
             {topic}
           </span>
-          {suggestSub && (
-            <span className="bg-warning-light text-warning rounded px-1.5 py-0.5 text-[10px]">
-              新主题，建议订阅
-            </span>
-          )}
         </div>
       )}
 

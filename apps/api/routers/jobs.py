@@ -1,34 +1,22 @@
-"""定时任务 & 行动记录路由
-@author ScholarMind Team
-"""
+"""Background jobs and collection action routes."""
+
+from __future__ import annotations
 
 import logging
+import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
-from packages.ai.daily_runner import run_daily_ingest
+from packages.ai.daily_runner import PAPER_CONCURRENCY, _process_paper
 from packages.domain.enums import ReadStatus
 from packages.domain.task_tracker import global_tracker
 from packages.storage.db import session_scope
-from packages.storage.repositories import PaperRepository
+from packages.storage.repositories import ActionRepository, PaperRepository
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-@router.post("/jobs/daily/run-once")
-def run_daily_once() -> dict:
-    """每日任务（抓取）- 后台执行"""
-
-    def _fn(progress_callback=None):
-        if progress_callback:
-            progress_callback("正在执行订阅收集...", 10, 100)
-        ingest = run_daily_ingest()
-        return {"ingest": ingest}
-
-    task_id = global_tracker.submit("daily_job", "📅 每日收集任务执行", _fn, category="collection")
-    return {"task_id": task_id, "message": "每日任务已启动", "status": "running"}
 
 
 @router.post("/jobs/batch-process-unread")
@@ -36,22 +24,16 @@ def batch_process_unread(
     background_tasks: BackgroundTasks,
     max_papers: int = Query(default=50, ge=1, le=200),
 ) -> dict:
-    """批量处理未读论文（embed + skim 并行）- 后台执行"""
-    import uuid
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    """Embed and skim unread papers in the background."""
 
-    from packages.ai.daily_runner import PAPER_CONCURRENCY, _process_paper
-
-    # 先获取需要处理的论文数量
     with session_scope() as session:
         repo = PaperRepository(session)
         unread = repo.list_by_read_status(ReadStatus.unread, limit=max_papers)
-        target_ids = []
-        for p in unread:
-            needs_embed = p.embedding is None
-            needs_skim = p.read_status == ReadStatus.unread
-            if needs_embed or needs_skim:
-                target_ids.append(p.id)
+        target_ids = [
+            p.id
+            for p in unread
+            if p.embedding is None or p.read_status == ReadStatus.unread
+        ]
 
     total = len(target_ids)
     if total == 0:
@@ -59,42 +41,42 @@ def batch_process_unread(
 
     task_id = f"batch_unread_{uuid.uuid4().hex[:8]}"
 
-    def _run_batch():
+    def _run_batch() -> None:
         processed = 0
         failed = 0
         try:
             global_tracker.start(
                 task_id,
                 "batch_process",
-                f"📚 批量处理未读论文 ({total} 篇)",
+                f"批量处理未读论文 ({total} 篇)",
                 total=total,
                 category="analysis",
             )
 
             with ThreadPoolExecutor(max_workers=PAPER_CONCURRENCY) as pool:
-                futs = {pool.submit(_process_paper, pid): pid for pid in target_ids}
-                for fut in as_completed(futs):
+                futures = {pool.submit(_process_paper, pid): pid for pid in target_ids}
+                for fut in as_completed(futures):
                     try:
                         fut.result()
                         processed += 1
                         global_tracker.update(
-                            task_id, processed, f"正在处理... ({processed}/{total})", total=total
+                            task_id,
+                            processed,
+                            f"正在处理... ({processed}/{total})",
+                            total=total,
                         )
                     except Exception as exc:
                         failed += 1
-                        logger.warning("batch process %s failed: %s", str(futs[fut])[:8], exc)
+                        logger.warning("batch process %s failed: %s", str(futures[fut])[:8], exc)
 
             global_tracker.finish(task_id, success=True)
-            logger.info(f"批量处理完成: {processed} 成功, {failed} 失败")
-        except Exception as e:
-            global_tracker.finish(task_id, success=False, error=str(e))
-            logger.error(f"批量处理失败: {e}", exc_info=True)
+            logger.info("Batch processing finished: %s success, %s failed", processed, failed)
+        except Exception as exc:
+            global_tracker.finish(task_id, success=False, error=str(exc))
+            logger.error("Batch processing failed: %s", exc, exc_info=True)
 
     background_tasks.add_task(_run_batch)
     return {"task_id": task_id, "message": f"批量处理已启动 ({total} 篇论文)", "status": "running"}
-
-
-# ---------- 行动记录 ----------
 
 
 @router.get("/actions")
@@ -104,12 +86,10 @@ def list_actions(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
-    """列出论文入库行动记录"""
-    from packages.storage.repositories import ActionRepository
+    """List paper collection actions."""
 
     with session_scope() as session:
-        repo = ActionRepository(session)
-        actions, total = repo.list_actions(
+        actions, total = ActionRepository(session).list_actions(
             action_type=action_type,
             topic_id=topic_id,
             limit=limit,
@@ -134,12 +114,10 @@ def list_actions(
 
 @router.get("/actions/{action_id}")
 def get_action_detail(action_id: str) -> dict:
-    """获取行动详情"""
-    from packages.storage.repositories import ActionRepository
+    """Return one collection action."""
 
     with session_scope() as session:
-        repo = ActionRepository(session)
-        action = repo.get_action(action_id)
+        action = ActionRepository(session).get_action(action_id)
         if not action:
             raise HTTPException(status_code=404, detail="行动记录不存在")
         return {
@@ -158,12 +136,10 @@ def get_action_papers(
     action_id: str,
     limit: int = Query(default=200, ge=1, le=500),
 ) -> dict:
-    """获取某次行动关联的论文列表"""
-    from packages.storage.repositories import ActionRepository
+    """Return papers linked to one collection action."""
 
     with session_scope() as session:
-        repo = ActionRepository(session)
-        papers = repo.get_papers_by_action(action_id, limit=limit)
+        papers = ActionRepository(session).get_papers_by_action(action_id, limit=limit)
         return {
             "action_id": action_id,
             "items": [

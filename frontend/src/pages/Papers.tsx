@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Papers - 论文库（分页 + 文件夹/日期分类导航）
  * @author ScholarMind Team
  */
@@ -73,7 +73,6 @@ interface PaperLibraryReturnState {
   sortBy: string;
   sortOrder: "asc" | "desc";
   statusFilter: string;
-  activeCategory?: string;
   activeTagIds: string[];
   viewMode: "list" | "grid";
   savedAt: number;
@@ -101,7 +100,6 @@ function readPaperLibraryReturnState(): PaperLibraryReturnState | null {
       sortBy: parsed.sortBy ?? "created_at",
       sortOrder: parsed.sortOrder === "asc" ? "asc" : "desc",
       statusFilter: parsed.statusFilter ?? "",
-      activeCategory: parsed.activeCategory,
       activeTagIds: Array.isArray(parsed.activeTagIds) ? parsed.activeTagIds : [],
       viewMode: parsed.viewMode === "grid" ? "grid" : "list",
       savedAt: parsed.savedAt,
@@ -188,10 +186,6 @@ export default function Papers() {
     initialReturnState?.sortOrder ?? "desc"
   );
   const [statusFilter, setStatusFilter] = useState(initialReturnState?.statusFilter ?? "");
-  const [activeCategory, setActiveCategory] = useState<string | undefined>(
-    initialReturnState?.activeCategory
-  );
-  const [csFeeds, setCsFeeds] = useState<{ category_code: string; category_name: string }[]>([]);
 
   /* 标签相关 */
   const [tags, setTags] = useState<TagType[]>([]);
@@ -302,7 +296,6 @@ export default function Papers() {
         status: statusFilter || undefined,
         sortBy,
         sortOrder,
-        category: activeCategory || undefined,
         tagIds: activeTagIds.length > 0 ? activeTagIds : undefined,
       });
       setPapers(res.items);
@@ -324,7 +317,6 @@ export default function Papers() {
     statusFilter,
     sortBy,
     sortOrder,
-    activeCategory,
     activeTagIds,
     toast,
   ]);
@@ -416,13 +408,6 @@ export default function Papers() {
   useEffect(() => {
     loadPapers();
   }, [loadPapers]);
-  useEffect(() => {
-    topicApi
-      .csFeeds()
-      .then((r) => setCsFeeds(r.feeds || []))
-      .catch(() => {});
-  }, []);
-
   /* 构建文件夹列表 */
   const folders = useMemo((): FolderItem[] => {
     if (!folderStats) return [];
@@ -549,7 +534,6 @@ export default function Papers() {
         sortBy,
         sortOrder,
         statusFilter,
-        activeCategory,
         activeTagIds,
         viewMode,
         savedAt: Date.now(),
@@ -562,7 +546,6 @@ export default function Papers() {
     },
     [
       activeActionId,
-      activeCategory,
       activeDate,
       activeFolder,
       activeTagIds,
@@ -823,7 +806,7 @@ export default function Papers() {
                     {showDivider && <div className="border-border-light my-2 border-t" />}
                     {idx === 3 && folders.some((f) => f.type === "topic") && (
                       <p className="text-ink-tertiary mt-3 mb-1 px-2 text-[10px] font-medium tracking-widest uppercase">
-                        订阅主题
+                        主题库
                       </p>
                     )}
                     <button
@@ -1204,25 +1187,6 @@ export default function Papers() {
 
               {/* 分隔线 */}
               <div className="bg-border-light h-4 w-px" />
-
-              {/* CS 分类筛选 */}
-              {csFeeds.length > 0 && (
-                <select
-                  value={activeCategory || ""}
-                  onChange={(e) => {
-                    setActiveCategory(e.target.value || undefined);
-                    setPage(1);
-                  }}
-                  className="border-border bg-surface text-ink-secondary focus:border-primary h-7 cursor-pointer rounded-lg border px-2 text-[11px] focus:outline-none"
-                >
-                  <option value="">全部分类</option>
-                  {csFeeds.map((f) => (
-                    <option key={f.category_code} value={f.category_code}>
-                      {f.category_code}
-                    </option>
-                  ))}
-                </select>
-              )}
 
               {/* 排序字段 */}
               <select

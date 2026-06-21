@@ -1,4 +1,4 @@
-"""
+﻿"""
 数据仓储层
 @author ScholarMind Team
 """
@@ -29,8 +29,6 @@ from packages.storage.models import (
     CollectionAction,
     CompassAnalysisResult,
     CompassFeedback,
-    CSCategory,
-    CSFeedSubscription,
     EmailConfig,
     GeneratedContent,
     LLMProviderConfig,
@@ -171,7 +169,8 @@ class PaperRepository:
         clean_dois = [d for d in dois if d]
         if not clean_dois:
             return set()
-        q = select(Paper.doi).where(Paper.doi.in_(clean_dois))
+        doi_expr = func.json_extract(Paper.metadata_json, "$.doi")
+        q = select(doi_expr).where(doi_expr.in_(clean_dois))
         return set(self.session.execute(q).scalars())
 
     def list_by_read_status(self, status: ReadStatus, limit: int = 200) -> list[Paper]:
@@ -543,7 +542,7 @@ class PaperRepository:
             "manual_collect": "手动收集",
             "auto_collect": "自动收集",
             "agent_collect": "Agent收集",
-            "subscription_ingest": "订阅抓取",
+            "subscription_ingest": "主题收集",
             "reference_import": "参考文献",
         }
         by_action_source = [
@@ -1935,81 +1934,3 @@ class AgentPendingActionRepository:
         result = self.session.execute(q)
         self.session.flush()
         return result.rowcount
-
-
-class CSFeedRepository:
-    """arXiv CS 分类订阅 Repository"""
-
-    def __init__(self, session: Session):
-        self.session = session
-
-    def get_categories(self) -> list[CSCategory]:
-        return list(self.session.execute(select(CSCategory)).scalars())
-
-    def upsert_category(self, code: str, name: str, description: str = "") -> CSCategory:
-        existing = self.session.execute(
-            select(CSCategory).where(CSCategory.code == code)
-        ).scalar_one_or_none()
-        if existing:
-            existing.name = name
-            existing.description = description
-            existing.cached_at = datetime.now(UTC)
-            return existing
-        cat = CSCategory(code=code, name=name, description=description)
-        self.session.add(cat)
-        self.session.commit()
-        return cat
-
-    def get_subscriptions(self) -> list[CSFeedSubscription]:
-        return list(self.session.execute(select(CSFeedSubscription)).scalars())
-
-    def get_subscription(self, category_code: str) -> CSFeedSubscription | None:
-        return self.session.execute(
-            select(CSFeedSubscription).where(CSFeedSubscription.category_code == category_code)
-        ).scalar_one_or_none()
-
-    def upsert_subscription(
-        self, category_code: str, daily_limit: int, enabled: bool = True
-    ) -> CSFeedSubscription:
-        existing = self.get_subscription(category_code)
-        if existing:
-            existing.daily_limit = daily_limit
-            existing.enabled = enabled
-            self.session.commit()
-            return existing
-        sub = CSFeedSubscription(
-            category_code=category_code, daily_limit=daily_limit, enabled=enabled
-        )
-        self.session.add(sub)
-        self.session.commit()
-        return sub
-
-    def delete_subscription(self, category_code: str) -> bool:
-        sub = self.get_subscription(category_code)
-        if sub:
-            self.session.delete(sub)
-            self.session.commit()
-            return True
-        return False
-
-    def update_run_status(self, category_code: str, count: int):
-        sub = self.get_subscription(category_code)
-        if sub:
-            sub.last_run_at = datetime.now(UTC)
-            sub.last_run_count = count
-            sub.status = "active"
-            self.session.commit()
-
-    def set_cool_down(self, category_code: str, until: datetime):
-        sub = self.get_subscription(category_code)
-        if sub:
-            sub.status = "cool_down"
-            sub.cool_down_until = until
-            self.session.commit()
-
-    def get_active_subscriptions(self) -> list[CSFeedSubscription]:
-        return list(
-            self.session.execute(
-                select(CSFeedSubscription).where(CSFeedSubscription.enabled.is_(True))
-            ).scalars()
-        )

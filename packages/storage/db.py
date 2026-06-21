@@ -1,4 +1,4 @@
-"""
+﻿"""
 数据库引擎和会话管理
 @author ScholarMind Team
 """
@@ -227,44 +227,6 @@ def _migrate_legacy_email_configs(conn) -> None:
     )
 
 
-def _migrate_legacy_cs_categories(conn) -> None:
-    table = "cs_categories"
-    cols = _column_names(conn, table)
-    if not cols or ({"code", "name", "cached_at"} <= cols and "category_code" not in cols):
-        return
-    rows = []
-    seen: set[str] = set()
-    for row in _read_all_rows(conn, table):
-        code = row.get("code") or row.get("category_code") or row.get("id")
-        if not code or code in seen:
-            continue
-        seen.add(code)
-        rows.append(
-            {
-                "code": code,
-                "name": row.get("name") or row.get("category_name") or code,
-                "description": row.get("description") or "",
-                "cached_at": row.get("cached_at") or row.get("created_at") or _now_sql(),
-            }
-        )
-    _rebuild_table(
-        conn,
-        table,
-        """
-        CREATE TABLE {table} (
-            code VARCHAR(32) PRIMARY KEY NOT NULL,
-            name VARCHAR(128) NOT NULL,
-            description VARCHAR(512),
-            cached_at DATETIME
-        )
-        """,
-        """
-        INSERT OR IGNORE INTO {table} (code, name, description, cached_at)
-        VALUES (:code, :name, :description, :cached_at)
-        """,
-        rows,
-    )
-
 
 def _migrate_legacy_agent_pending_actions(conn) -> None:
     table = "agent_pending_actions"
@@ -331,7 +293,6 @@ def run_migrations() -> None:
         topic_cols_before = _column_names(conn, "topic_subscriptions")
         llm_cols_before = _column_names(conn, "llm_provider_configs")
         _migrate_legacy_email_configs(conn)
-        _migrate_legacy_cs_categories(conn)
         _migrate_legacy_agent_pending_actions(conn)
 
         _safe_add_column(conn, "topic_subscriptions", "max_results_per_run", "INTEGER", "20")

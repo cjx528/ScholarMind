@@ -1,4 +1,4 @@
-"""主题订阅 & 论文摄入路由
+"""Topic library and paper ingest routes.
 @author ScholarMind Team
 """
 
@@ -469,14 +469,14 @@ def delete_topic(topic_id: str) -> dict:
 
 @router.post("/topics/{topic_id}/fetch")
 def manual_fetch_topic(topic_id: str) -> dict:
-    """手动触发单个订阅的论文抓取（后台执行，立即返回）"""
+    """Manually fetch papers for one topic in the background."""
     from packages.ai.daily_runner import run_topic_ingest
     from packages.storage.models import TopicSubscription
 
     with session_scope() as session:
         topic = session.get(TopicSubscription, topic_id)
         if not topic:
-            raise NotFoundError("订阅不存在")
+            raise NotFoundError("主题不存在")
         topic_name = topic.name
 
     def _fetch_fn(progress_callback=None):
@@ -915,7 +915,7 @@ def ingest_arxiv(
         default=0,
         ge=0,
         le=3650,
-        description="只检索最近 N 天提交的论文，默认 0 = 不限日期（历史关键词搜索）；订阅可传 7/30",
+        description="只检索最近 N 天提交的论文，默认 0 = 不限日期（历史关键词搜索）",
     ),
 ) -> dict:
     logger.info(
