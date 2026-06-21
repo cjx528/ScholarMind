@@ -3,14 +3,41 @@
 """
 
 from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import func, select
 
 from apps.api.deps import graph_service, iso_dt
 from packages.ai.graph_service import repair_topic_wiki_payload
 from packages.domain.task_tracker import global_tracker
 from packages.storage.db import session_scope
+from packages.storage.models import GeneratedContent
 from packages.storage.repositories import GeneratedContentRepository
 
 router = APIRouter()
+
+
+def _result_metadata(result: dict, task_id: str | None = None) -> dict:
+    metadata = {k: v for k, v in result.items() if k != "markdown"}
+    if task_id:
+        metadata["task_id"] = task_id
+    return metadata
+
+
+def _generated_detail_payload(gc: GeneratedContent) -> dict:
+    metadata_json = gc.metadata_json or {}
+    markdown = gc.markdown
+    if gc.content_type == "topic_wiki":
+        metadata_json = repair_topic_wiki_payload(metadata_json, gc.keyword)
+        markdown = metadata_json.get("markdown") or markdown
+    return {
+        "id": gc.id,
+        "content_type": gc.content_type,
+        "title": gc.title,
+        "keyword": gc.keyword,
+        "paper_id": gc.paper_id,
+        "markdown": markdown,
+        "metadata_json": metadata_json,
+        "created_at": iso_dt(gc.created_at),
+    }
 
 
 # ---------- Wiki ----------
@@ -26,7 +53,7 @@ def wiki_paper(paper_id: str) -> dict:
             title=f"Paper Wiki: {result.get('title', paper_id)}",
             markdown=result.get("markdown", ""),
             paper_id=paper_id,
-            metadata_json={k: v for k, v in result.items() if k != "markdown"},
+            metadata_json=_result_metadata(result),
         )
         result["content_id"] = gc.id
     return result
@@ -45,7 +72,7 @@ def wiki_topic(
             title=f"Topic Wiki: {keyword}",
             markdown=result.get("markdown", ""),
             keyword=keyword,
-            metadata_json={k: v for k, v in result.items() if k != "markdown"},
+            metadata_json=_result_metadata(result),
         )
         result["content_id"] = gc.id
     return result
@@ -58,6 +85,7 @@ def _run_topic_wiki_task(
     keyword: str,
     limit: int,
     progress_callback=None,
+    task_id: str | None = None,
 ) -> dict:
     """后台执行 topic wiki 生成"""
 
@@ -75,9 +103,11 @@ def _run_topic_wiki_task(
             title=f"Topic Wiki: {keyword}",
             markdown=result.get("markdown", ""),
             keyword=keyword,
-            metadata_json={k: v for k, v in result.items() if k != "markdown"},
+            metadata_json=_result_metadata(result, task_id=task_id),
         )
         result["content_id"] = gc.id
+    if task_id:
+        result["task_id"] = task_id
     if progress_callback:
         progress_callback("Wiki 生成完成", 100, 100)
     return result
@@ -86,6 +116,7 @@ def _run_topic_wiki_task(
 def _run_paper_wiki_task(
     paper_id: str,
     progress_callback=None,
+    task_id: str | None = None,
 ) -> dict:
     """后台执行 paper wiki 生成"""
     if progress_callback:
@@ -100,9 +131,11 @@ def _run_paper_wiki_task(
             title=f"Paper Wiki: {result.get('title', paper_id)}",
             markdown=result.get("markdown", ""),
             paper_id=paper_id,
-            metadata_json={k: v for k, v in result.items() if k != "markdown"},
+            metadata_json=_result_metadata(result, task_id=task_id),
         )
         result["content_id"] = gc.id
+    if task_id:
+        result["task_id"] = task_id
     if progress_callback:
         progress_callback("Wiki 生成完成", 100, 100)
     return result
@@ -164,6 +197,21 @@ def generated_list(
         }
 
 
+@router.get("/generated/by-task/{task_id}")
+def generated_by_task(task_id: str) -> dict:
+    with session_scope() as session:
+        q = (
+            select(GeneratedContent)
+            .where(func.json_extract(GeneratedContent.metadata_json, "$.task_id") == task_id)
+            .order_by(GeneratedContent.created_at.desc())
+            .limit(1)
+        )
+        gc = session.execute(q).scalar_one_or_none()
+        if gc is None:
+            raise HTTPException(status_code=404, detail="Content not found")
+        return _generated_detail_payload(gc)
+
+
 @router.get("/generated/{content_id}")
 def generated_detail(content_id: str) -> dict:
     with session_scope() as session:
@@ -172,21 +220,7 @@ def generated_detail(content_id: str) -> dict:
             gc = repo.get_by_id(content_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Content not found") from exc
-        metadata_json = gc.metadata_json
-        markdown = gc.markdown
-        if gc.content_type == "topic_wiki":
-            metadata_json = repair_topic_wiki_payload(metadata_json, gc.keyword)
-            markdown = metadata_json.get("markdown") or markdown
-        return {
-            "id": gc.id,
-            "content_type": gc.content_type,
-            "title": gc.title,
-            "keyword": gc.keyword,
-            "paper_id": gc.paper_id,
-            "markdown": markdown,
-            "metadata_json": metadata_json,
-            "created_at": iso_dt(gc.created_at),
-        }
+        return _generated_detail_payload(gc)
 
 
 @router.delete("/generated/{content_id}")

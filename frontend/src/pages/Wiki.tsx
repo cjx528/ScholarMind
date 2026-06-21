@@ -252,9 +252,18 @@ export default function Wiki() {
         return true;
       }
 
+      try {
+        const content = await generatedApi.byTask(task.taskId);
+        if (content.content_type === task.contentType) {
+          if (display) showGeneratedContent(content);
+          return true;
+        }
+      } catch {
+        /* fallback to strict identity matching below */
+      }
+
       const result = await generatedApi.list(task.contentType, 50);
-      const matchedItem =
-        result.items?.find((item) => generatedItemMatchesTask(item, task)) || result.items?.[0];
+      const matchedItem = result.items?.find((item) => generatedItemMatchesTask(item, task));
       if (matchedItem) {
         const content = await generatedApi.detail(matchedItem.id);
         if (display) showGeneratedContent(content);

@@ -453,7 +453,6 @@ def _fallback_topic_summary_data(
         for sec in sections
         if isinstance(sec, dict) and str(sec.get("title") or "").strip()
     ]
-    paper_titles = [_paper_title(paper) for paper in paper_contexts if _paper_title(paper)]
     findings = [
         f"当前资料显示，「{keyword}」需要从「{title}」角度理解。"
         for title in section_titles[:3]
@@ -468,7 +467,6 @@ def _fallback_topic_summary_data(
     return {
         "key_findings": findings,
         "future_directions": directions,
-        "reading_list": paper_titles[:6],
     }
 
 
@@ -552,8 +550,7 @@ def repair_topic_wiki_payload(payload: dict | None, keyword: str | None = None) 
         content["key_findings"] = fallback_summary["key_findings"]
     if not content.get("future_directions"):
         content["future_directions"] = fallback_summary["future_directions"]
-    if not content.get("reading_list"):
-        content["reading_list"] = fallback_summary["reading_list"]
+    content.pop("reading_list", None)
     repaired["wiki_content"] = content
     repaired["markdown"] = _topic_wiki_markdown(topic, content)
     return repaired
@@ -1651,7 +1648,6 @@ class GraphService:
         survey_obj = result.parsed_json or {
             "overview": "当前样本不足以生成高质量综述。",
             "stages": [],
-            "reading_list": [x["title"] for x in base["seminal"][:5]],
             "open_questions": [],
         }
         return {
@@ -1797,7 +1793,6 @@ class GraphService:
             "significance": "",
             "limitations": [],
             "related_work_analysis": "",
-            "reading_suggestions": [],
         }
 
         # 注入额外元数据供前端展示
@@ -1981,8 +1976,7 @@ class GraphService:
             f"参考: {survey_overview[:300]}\n\n"
             f"外部高影响力论文: {', '.join(str(item.get('title', '')) for item in external_meta[:5])}\n\n"
             '输出: {"key_findings": ["发现1","发现2","发现3"],'
-            ' "future_directions": ["方向1","方向2","方向3"],'
-            ' "reading_list": ["论文1","论文2"]}'
+            ' "future_directions": ["方向1","方向2","方向3"]}'
         )
         summary_result = self.llm.complete_json(
             summary_prompt,
@@ -2010,7 +2004,6 @@ class GraphService:
             "key_findings": summary_data.get("key_findings", []),
             "methodology_evolution": "",
             "future_directions": summary_data.get("future_directions", []),
-            "reading_list": summary_data.get("reading_list", []),
             "citation_contexts": citation_contexts[:20],
             "pdf_excerpts": pdf_excerpts,
             "scholar_metadata": scholar_meta,

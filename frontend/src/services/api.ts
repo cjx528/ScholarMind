@@ -520,6 +520,7 @@ import type { GeneratedContent, GeneratedContentListItem } from "@/types";
 export const generatedApi = {
   list: (type: string, limit = 50) =>
     get<{ items: GeneratedContentListItem[] }>(`/generated/list?type=${type}&limit=${limit}`),
+  byTask: (taskId: string) => get<GeneratedContent>(`/generated/by-task/${taskId}`),
   detail: (id: string) => get<GeneratedContent>(`/generated/${id}`),
   delete: (id: string) => del<{ deleted: string }>(`/generated/${id}`),
 };

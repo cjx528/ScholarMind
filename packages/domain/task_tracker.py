@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 import time
@@ -23,6 +24,14 @@ logger = logging.getLogger(__name__)
 
 # 完成后保留 5 分钟供前端展示（让用户能看到更多历史）
 _FINISHED_TTL = 600
+
+
+def _accepts_keyword(fn: Callable[..., Any], name: str) -> bool:
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    return any(param.name == name for param in signature.parameters.values())
 
 
 @dataclass
@@ -146,12 +155,15 @@ class TaskTracker:
 
         def _run():
             try:
+                call_kwargs = dict(kwargs)
+                if _accepts_keyword(fn, "task_id"):
+                    call_kwargs["task_id"] = task_id
                 result = fn(
                     *args,
                     progress_callback=lambda msg, cur, tot: self.update(
                         task_id, cur, msg, total=tot or total
                     ),
-                    **kwargs,
+                    **call_kwargs,
                 )
                 with self._lock:
                     task = self._tasks.get(task_id)

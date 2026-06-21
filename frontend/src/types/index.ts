@@ -278,7 +278,6 @@ export interface SurveyResponse {
   summary: {
     overview: string;
     stages: string[];
-    reading_list: string[];
     open_questions: string[];
   };
   milestones: TimelineEntry[];

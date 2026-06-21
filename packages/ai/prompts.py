@@ -72,7 +72,6 @@ def build_survey_prompt(
         "你是科研综述作者。请输出严格 JSON：\n"
         '{"overview":"...", '
         '"stages":[{"name":"...","description":"..."}], '
-        '"reading_list":["...","..."], '
         '"open_questions":["...","..."]}\n'
         f"主题关键词: {keyword}\n"
         f"里程碑:\n{milestone_text}\n\n"
@@ -137,10 +136,6 @@ def build_topic_wiki_prompt(
         '  "future_directions": [\n'
         '    "未来方向1",\n'
         '    "未来方向2"\n'
-        "  ],\n"
-        '  "reading_list": [\n'
-        '    {"title": "论文标题", "year": 2020, '
-        '"reason": "推荐理由"}\n'
         "  ]\n"
         "}\n```\n\n"
         "## 写作要求\n"
@@ -149,7 +144,6 @@ def build_topic_wiki_prompt(
         "关键变体与改进、应用场景、挑战与局限\n"
         "3. 用学术但易懂的语言，中文撰写\n"
         "4. 每个章节需要有深度分析，不是简单罗列\n"
-        "5. reading_list 至少推荐 5 篇关键论文\n\n"
         f"## 主题关键词: {keyword}\n\n"
         f"## 里程碑论文:\n{milestone_text}\n\n"
         f"## 最具影响力论文:\n{seminal_text}\n\n"
@@ -193,10 +187,7 @@ def build_paper_wiki_prompt(
         '结合引用关系）",\n'
         '  "limitations": ["局限性1", "局限性2"],\n'
         '  "related_work_analysis": "相关工作分析'
-        '（500-1000字，引用[R1][R2]等标记）",\n'
-        '  "reading_suggestions": [\n'
-        '    {"title": "推荐论文", "reason": "理由"}\n'
-        "  ]\n"
+        '（500-1000字，引用[R1][R2]等标记）"\n'
         "}\n```\n\n"
         f"## 论文标题: {title}\n\n"
         f"## 摘要:\n{abstract}\n\n"

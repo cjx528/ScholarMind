@@ -109,3 +109,18 @@ def test_external_high_citation_papers_merge_into_seminal_timeline() -> None:
     assert merged["seminal"][0]["external"] is True
     assert merged["seminal"][0]["citation_count"] == 12000
     assert merged["seminal"][0]["source"] == "semantic_scholar"
+
+
+def test_repair_topic_wiki_payload_removes_reading_list() -> None:
+    repaired = repair_topic_wiki_payload(
+        {
+            "wiki_content": {
+                "overview": "This overview is long enough to survive sanitization. " * 3,
+                "sections": [],
+                "reading_list": ["stale recommendation"],
+            }
+        },
+        "continual learning",
+    )
+
+    assert "reading_list" not in repaired["wiki_content"]
