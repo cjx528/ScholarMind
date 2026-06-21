@@ -642,7 +642,9 @@ export const tasksApi = {
       `/tasks/wiki/topic?keyword=${encodeURIComponent(keyword)}&limit=${limit}`
     ),
   startPaperWiki: (paperId: string) =>
-    post<{ task_id: string; status: string }>(`/tasks/wiki/paper/${paperId}`),
+    post<{ task_id: string; status: string; paper_id?: string; title?: string }>(
+      `/tasks/wiki/paper/${encodeURIComponent(paperId)}`
+    ),
   getStatus: (taskId: string) => get<TaskStatus>(`/tasks/${taskId}`),
   getResult: (taskId: string) => get<Record<string, unknown>>(`/tasks/${taskId}/result`),
   list: (taskType?: string, limit = 20) =>

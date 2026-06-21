@@ -1,9 +1,15 @@
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from apps.api.routers.content import resolve_paper_reference
 from packages.ai.graph_service import (
     _fallback_topic_overview,
     _merge_seminal_with_external,
     _sanitize_wiki_text,
     repair_topic_wiki_payload,
 )
+from packages.storage.db import Base
+from packages.storage.models import Paper
 
 
 def test_sanitize_rejects_pseudo_wiki_overview() -> None:
@@ -124,3 +130,25 @@ def test_repair_topic_wiki_payload_removes_reading_list() -> None:
     )
 
     assert "reading_list" not in repaired["wiki_content"]
+
+
+def test_resolve_paper_reference_accepts_uuid_arxiv_url_and_title() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        paper = Paper(
+            arxiv_id="2501.01234",
+            title="Medical Imaging Continual Learning",
+            abstract="",
+            metadata_json={"source_id": "openreview-demo", "doi": "10.1234/wiki"},
+        )
+        session.add(paper)
+        session.flush()
+        paper_id = paper.id
+
+        assert resolve_paper_reference(session, paper_id).id == paper_id
+        assert resolve_paper_reference(session, "https://arxiv.org/abs/2501.01234v2").id == paper_id
+        assert resolve_paper_reference(session, "Medical Imaging Continual Learning").id == paper_id
+        assert resolve_paper_reference(session, "openreview-demo").id == paper_id

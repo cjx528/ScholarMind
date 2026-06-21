@@ -178,6 +178,7 @@ export default function Wiki() {
   const [paperId, setPaperId] = useState("");
   const [topicWiki, setTopicWiki] = useState<TopicWiki | null>(null);
   const [paperWiki, setPaperWiki] = useState<PaperWiki | null>(null);
+  const [queryError, setQueryError] = useState("");
 
   /* 后台任务状态 */
   const [activeWikiTasks, setActiveWikiTasks] = useState<ActiveWikiTaskMap>({});
@@ -410,6 +411,7 @@ export default function Wiki() {
   const handleQuery = async () => {
     if (activeTaskForTab) return;
     setSelectedContent(null);
+    setQueryError("");
     try {
       if (activeTab === "topic" && keyword.trim()) {
         // 后台任务模式
@@ -431,13 +433,13 @@ export default function Wiki() {
         return;
       } else if (activeTab === "paper" && paperId.trim()) {
         const cleanPaperId = paperId.trim();
-        const { task_id } = await tasksApi.startPaperWiki(cleanPaperId);
+        const { task_id, paper_id, title } = await tasksApi.startPaperWiki(cleanPaperId);
         const task: ActiveWikiTask = {
           taskId: task_id,
           kind: "paper",
           contentType: "paper_wiki",
-          paperId: cleanPaperId,
-          label: `Paper Wiki: ${cleanPaperId}`,
+          paperId: paper_id || cleanPaperId,
+          label: `Paper Wiki: ${title || cleanPaperId}`,
         };
         setTaskStates((prev) => ({
           ...prev,
@@ -448,8 +450,8 @@ export default function Wiki() {
         return;
       }
       loadHistory(contentType);
-    } catch {
-      /* */
+    } catch (error) {
+      setQueryError(error instanceof Error ? error.message : "Wiki 任务提交失败");
     }
   };
 
@@ -521,6 +523,7 @@ export default function Wiki() {
           setSelectedContent(null);
           setTopicWiki(null);
           setPaperWiki(null);
+          setQueryError("");
         }}
       />
 
@@ -551,6 +554,12 @@ export default function Wiki() {
             生成 Wiki
           </Button>
         </div>
+        {queryError && (
+          <div className="mt-3 flex items-start gap-2 rounded-xl border border-error/20 bg-error/5 px-3 py-2 text-sm text-error">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{queryError}</span>
+          </div>
+        )}
       </div>
 
       {/* 生成中 — 支持主题 Wiki 与论文 Wiki 并行 */}

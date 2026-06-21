@@ -1739,17 +1739,30 @@ class GraphService:
             "analysis": parsed,
         }
 
-    def paper_wiki(self, paper_id: str) -> dict:
+    def paper_wiki(
+        self,
+        paper_id: str,
+        progress_callback: Callable[[str, int, int], None] | None = None,
+    ) -> dict:
+        def _progress(pct: float, msg: str):
+            if progress_callback:
+                progress_callback(msg, int(pct * 100), 100)
+
+        _progress(0.05, "收集论文引用关系...")
         tree = self.citation_tree(root_paper_id=paper_id, depth=2)
 
         # 1. 富化上下文收集（向量搜索 + 引用上下文 + PDF）
+        _progress(0.18, "收集论文正文、相似论文和引用上下文...")
         ctx = self.context_gatherer.gather_paper_context(paper_id)
         p_title = ctx["paper"].get("title", "")
+        if not p_title:
+            raise ValueError(f"paper {paper_id} not found for paper wiki generation")
         p_abstract = ctx["paper"].get("abstract", "")
         p_arxiv = ctx["paper"].get("arxiv_id", "")
         analysis = ctx["paper"].get("analysis", "")
 
         # 2. Semantic Scholar 元数据
+        _progress(0.35, "补充外部学术元数据...")
         scholar_meta: list[dict] = []
         try:
             all_titles = [p_title] + ctx.get("ancestor_titles", [])[:5]
@@ -1758,6 +1771,7 @@ class GraphService:
             logger.warning("Scholar metadata fetch failed: %s", exc)
 
         # 3. LLM 生成结构化 wiki
+        _progress(0.5, "生成论文 Wiki 内容...")
         prompt = build_paper_wiki_prompt(
             title=p_title,
             abstract=p_abstract,
@@ -1805,6 +1819,7 @@ class GraphService:
         wiki_content["scholar_metadata"] = scholar_meta
 
         # 备用 markdown
+        _progress(0.82, "整理 Wiki 结构...")
         md_parts = [
             f"# {p_title}",
             f"\narXiv: {p_arxiv}",
