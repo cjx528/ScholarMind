@@ -334,7 +334,9 @@ export const paperApi = {
       : `${getApiBase().replace(/\/+$/, "")}/papers/${id}/pdf${suffix}`;
   },
   downloadPdf: (id: string) =>
-    post<{ status: string; pdf_path: string }>(`/papers/${id}/download-pdf`),
+    post<{ status: string; pdf_path: string; source?: string; arxiv_id?: string }>(
+      `/papers/${id}/download-pdf`
+    ),
   aiExplain: (id: string, text: string, action: "explain" | "translate" | "summarize") =>
     post<{ action: string; result: string }>(`/papers/${id}/ai/explain`, { text, action }),
   ask: (id: string, data: PaperAskRequest) =>

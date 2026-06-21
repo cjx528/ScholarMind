@@ -163,7 +163,7 @@ class TaskTracker:
                 self.finish(task_id, success=False, error=str(exc)[:200])
                 logger.error("Task %s failed: %s - %s", task_id, title, exc)
 
-        thread = threading.Thread(target=_run, daemon=True, name=f"task-{task_id}")
+        thread = threading.Thread(target=_run, name=f"task-{task_id}")
         thread.start()
         return task_id
 

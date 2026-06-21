@@ -61,18 +61,13 @@ def _run_topic_wiki_task(
 ) -> dict:
     """后台执行 topic wiki 生成"""
 
-    # task_tracker 传入的 progress_callback 签名为 (msg, cur, tot)
-    # graph_service.topic_wiki 期望的签名为 (pct: float, msg: str)
-    # 做适配器转换
-    def _adapted_progress(pct: float, msg: str):
-        if progress_callback:
-            progress_callback(msg, int(pct * 100), 100)
-
     result = graph_service.topic_wiki(
         keyword=keyword,
         limit=limit,
         progress_callback=progress_callback,
     )
+    if progress_callback:
+        progress_callback("正在保存 Wiki...", 95, 100)
     with session_scope() as session:
         repo = GeneratedContentRepository(session)
         gc = repo.create(
@@ -83,6 +78,8 @@ def _run_topic_wiki_task(
             metadata_json={k: v for k, v in result.items() if k != "markdown"},
         )
         result["content_id"] = gc.id
+    if progress_callback:
+        progress_callback("Wiki 生成完成", 100, 100)
     return result
 
 

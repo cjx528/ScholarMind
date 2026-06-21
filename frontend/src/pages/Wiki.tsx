@@ -120,6 +120,11 @@ function saveActiveWikiTasks(tasks: ActiveWikiTask[]) {
   }
 }
 
+function persistActiveWikiTask(task: ActiveWikiTask) {
+  const existing = readActiveWikiTasks().filter((item) => item.kind !== task.kind);
+  saveActiveWikiTasks([...existing, task]);
+}
+
 function readActiveWikiTasks(): ActiveWikiTask[] {
   try {
     const multiRaw = localStorage.getItem(ACTIVE_WIKI_TASKS_KEY);
@@ -149,6 +154,21 @@ function clearActiveWikiTasks() {
   } catch {
     /* ignore storage errors */
   }
+}
+
+function generatedItemMatchesTask(item: GeneratedContentListItem, task: ActiveWikiTask) {
+  if (item.content_type !== task.contentType) return false;
+  if (task.kind === "topic") {
+    const keyword = (task.keyword || "").trim().toLowerCase();
+    if (!keyword) return false;
+    return (
+      (item.keyword || "").trim().toLowerCase() === keyword ||
+      item.title.trim().toLowerCase() === `topic wiki: ${keyword}`
+    );
+  }
+  const paperId = (task.paperId || "").trim();
+  if (!paperId) return false;
+  return item.paper_id === paperId || item.title.includes(paperId.slice(0, 8));
 }
 
 export default function Wiki() {
@@ -217,7 +237,7 @@ export default function Wiki() {
   }, []);
 
   const loadTaskResultContent = useCallback(
-    async (task: ActiveWikiTask, display: boolean) => {
+    async (task: ActiveWikiTask, display: boolean): Promise<boolean> => {
       let contentId = "";
       try {
         const result = await tasksApi.getResult(task.taskId);
@@ -229,19 +249,24 @@ export default function Wiki() {
       if (contentId) {
         const content = await generatedApi.detail(contentId);
         if (display) showGeneratedContent(content);
-        return;
+        return true;
       }
 
-      const result = await generatedApi.list(task.contentType, 1);
-      if (result.items?.length) {
-        const content = await generatedApi.detail(result.items[0].id);
+      const result = await generatedApi.list(task.contentType, 50);
+      const matchedItem =
+        result.items?.find((item) => generatedItemMatchesTask(item, task)) || result.items?.[0];
+      if (matchedItem) {
+        const content = await generatedApi.detail(matchedItem.id);
         if (display) showGeneratedContent(content);
+        return true;
       }
+      return false;
     },
     [showGeneratedContent]
   );
 
   const upsertActiveWikiTask = useCallback((task: ActiveWikiTask) => {
+    persistActiveWikiTask(task);
     setActiveWikiTasks((prev) => {
       const next = { ...prev, [task.kind]: task };
       saveActiveWikiTasks(Object.values(next).filter((item): item is ActiveWikiTask => Boolean(item)));
@@ -300,6 +325,7 @@ export default function Wiki() {
         } catch (error) {
           const message = error instanceof Error ? error.message : "";
           if (message.includes("404") || /not found/i.test(message)) {
+            await loadTaskResultContent(task, activeTabRef.current === task.kind);
             removeActiveWikiTask(task);
             delete pollTimerRefs.current[task.taskId];
             loadHistory(task.contentType);
@@ -391,6 +417,7 @@ export default function Wiki() {
           ...prev,
           [task_id]: { progress: 0, message: "任务已提交，正在初始化..." },
         }));
+        persistActiveWikiTask(task);
         pollTask(task);
         return;
       } else if (activeTab === "paper" && paperId.trim()) {
@@ -407,6 +434,7 @@ export default function Wiki() {
           ...prev,
           [task_id]: { progress: 0, message: "任务已提交，正在初始化..." },
         }));
+        persistActiveWikiTask(task);
         pollTask(task);
         return;
       }

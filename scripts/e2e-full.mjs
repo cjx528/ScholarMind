@@ -56,16 +56,6 @@ const info = (msg) => console.log(`  ℹ️  ${msg}`);
   logo.includes("论文总量") ? pass("统计卡片: 论文总量") : fail("统计卡片缺失");
   logo.includes("本周新增") ? pass("统计卡片: 本周新增") : fail("统计卡片: 本周新增缺失");
 
-  // 检查能力卡片
-  for (const cap of ["搜索调研", "下载论文", "论文分析"]) {
-    logo.includes(cap) ? pass(`能力卡片: ${cap}`) : fail(`能力卡片缺失: ${cap}`);
-  }
-
-  // 检查快捷按钮
-  for (const btn of ["搜索论文", "下载入库", "知识问答", "生成 Wiki"]) {
-    logo.includes(btn) ? pass(`快捷按钮: ${btn}`) : fail(`快捷按钮缺失: ${btn}`);
-  }
-
   // 检查输入框
   const chatInput = await page.$("textarea");
   chatInput ? pass("对话输入框存在") : fail("对话输入框缺失");

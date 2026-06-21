@@ -35,74 +35,6 @@ import { ActionConfirmCard } from "./AgentSteps";
 import { UserMessage, AssistantMessage, StepGroupCard } from "./AgentMessages";
 import { ChatNavBar } from "./ChatNavBar";
 
-/* ========== 能力芯片（输入框上方始终显示） ========== */
-
-interface Ability {
-  icon: typeof Search;
-  label: string;
-  prefix: string;
-  placeholder: string;
-  direct?: boolean;
-}
-
-const ABILITIES: Ability[] = [
-  { icon: Search, label: "搜索论文", prefix: "帮我搜索关于 ", placeholder: "输入搜索关键词..." },
-  {
-    icon: Download,
-    label: "下载入库",
-    prefix: "从 arXiv 下载关于 ",
-    placeholder: "输入主题关键词...",
-  },
-  { icon: Brain, label: "知识问答", prefix: "基于知识库回答：", placeholder: "输入你的问题..." },
-  {
-    icon: FileText,
-    label: "生成 Wiki",
-    prefix: "帮我生成一篇关于 ",
-    placeholder: "输入 Wiki 主题...",
-  },
-];
-
-/* ========== 快捷建议（空状态卡片） ========== */
-
-const SUGGESTIONS = [
-  {
-    icon: Sparkles,
-    label: "画像推荐",
-    desc: "按用户画像推荐论文",
-    prompt: "请根据我的用户画像为我推荐论文",
-  },
-  {
-    icon: Search,
-    label: "搜索调研",
-    desc: "搜索特定领域论文",
-    prompt: "帮我搜索关于 3D Gaussian Splatting 的最新论文",
-  },
-  {
-    icon: Download,
-    label: "下载论文",
-    desc: "从 arXiv 获取并分析",
-    prompt: "从 arXiv 下载最新的大语言模型相关论文，然后帮我粗读分析",
-  },
-  {
-    icon: BookOpen,
-    label: "论文分析",
-    desc: "粗读/精读已有论文",
-    prompt: "帮我分析库中最近的论文，先粗读再挑选重要的精读",
-  },
-  {
-    icon: Brain,
-    label: "知识问答",
-    desc: "基于知识库回答",
-    prompt: "基于知识库回答：什么是 attention mechanism？有哪些变体？",
-  },
-  {
-    icon: FileText,
-    label: "生成 Wiki",
-    desc: "生成主题综述",
-    prompt: "帮我生成一篇关于 Neural Radiance Fields 的 Wiki 综述",
-  },
-];
-
 /* ========== 工具元数据 ========== */
 
 const TOOL_META: Record<string, { icon: typeof Search; label: string }> = {
@@ -145,7 +77,6 @@ export default function Agent() {
   } = useAgentSession();
 
   const [input, setInput] = useState("");
-  const [activeAbility, setActiveAbility] = useState<Ability | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -186,26 +117,11 @@ export default function Agent() {
 
   const inputDisabled = loading || hasPendingConfirm;
 
-  const handleAbilityClick = useCallback(
-    (ability: Ability) => {
-      if (ability.direct) {
-        isAtBottomRef.current = true;
-        sendMessage(ability.prefix).catch(() => {});
-        return;
-      }
-      setActiveAbility(ability);
-      setInput(ability.prefix);
-      requestAnimationFrame(() => textareaRef.current?.focus());
-    },
-    [sendMessage]
-  );
-
   const handleSend = useCallback(
     async (text: string) => {
       const savedInput = text;
       isAtBottomRef.current = true;
       setInput("");
-      setActiveAbility(null);
       try {
         await sendMessage(text);
       } catch {
@@ -228,11 +144,6 @@ export default function Agent() {
       e.preventDefault();
       handleSend(input);
     }
-    if (e.key === "Backspace" && activeAbility && input === activeAbility.prefix) {
-      e.preventDefault();
-      setActiveAbility(null);
-      setInput("");
-    }
   };
 
   return (
@@ -245,7 +156,7 @@ export default function Agent() {
           className="relative flex-1 overflow-y-auto"
         >
           {items.length === 0 ? (
-            <EmptyState onSelect={(p) => handleSend(p)} />
+            <EmptyState />
           ) : (
             <div className="mx-auto max-w-3xl px-4 py-6">
               {items.map((item, idx) => {
@@ -316,34 +227,6 @@ export default function Agent() {
               </div>
             )}
 
-            {/* 能力芯片 */}
-            {!hasPendingConfirm && (
-              <div className="flex flex-wrap gap-1.5">
-                {ABILITIES.map((ab) => {
-                  const isActive = activeAbility?.label === ab.label;
-                  return (
-                    <button
-                      key={ab.label}
-                      onClick={() =>
-                        isActive ? (setActiveAbility(null), setInput("")) : handleAbilityClick(ab)
-                      }
-                      disabled={loading}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
-                        isActive
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border bg-surface text-ink-secondary hover:border-primary/30 hover:bg-primary/5 hover:text-primary",
-                        loading && "opacity-50"
-                      )}
-                    >
-                      <ab.icon className="h-3 w-3" />
-                      {ab.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
             {/* 输入框 */}
             <div
               className={cn(
@@ -354,19 +237,12 @@ export default function Agent() {
               <textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(e) => {
-                  setInput(e.target.value);
-                  if (activeAbility && !e.target.value.startsWith(activeAbility.prefix)) {
-                    setActiveAbility(null);
-                  }
-                }}
+                onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={
                   hasPendingConfirm
                     ? "请先处理上方确认..."
-                    : activeAbility
-                      ? activeAbility.placeholder
-                      : "描述你的研究需求，或点击上方能力快捷使用..."
+                    : "描述你的研究需求..."
                 }
                 className="text-ink placeholder:text-ink-placeholder max-h-32 min-h-[40px] flex-1 resize-none bg-transparent text-sm focus:outline-none"
                 rows={1}
@@ -444,9 +320,9 @@ export default function Agent() {
 
 /* ========== 空状态 ========== */
 
-const EmptyState = memo(function EmptyState({ onSelect }: { onSelect: (p: string) => void }) {
+const EmptyState = memo(function EmptyState() {
   return (
-    <div className="flex h-full flex-col items-center overflow-y-auto px-4 pt-12 pb-4">
+    <div className="flex h-full flex-col items-center justify-center overflow-y-auto px-4 py-12">
       <div className="bg-primary/10 mb-6 flex h-16 w-16 items-center justify-center rounded-2xl">
         <Sparkles className="text-primary h-8 w-8" />
       </div>
@@ -454,23 +330,6 @@ const EmptyState = memo(function EmptyState({ onSelect }: { onSelect: (p: string
       <p className="text-ink-secondary mb-6 max-w-lg text-center text-sm leading-relaxed">
         告诉我你的研究需求，我会自动规划执行步骤：搜索论文、下载、分析、生成综述。
       </p>
-
-      {/* 快捷建议 */}
-      <div className="grid w-full max-w-2xl grid-cols-2 gap-3 md:grid-cols-3">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s.label}
-            onClick={() => onSelect(s.prompt)}
-            className="group border-border bg-surface hover:border-primary/30 flex flex-col gap-1.5 rounded-2xl border p-4 text-left transition-all hover:shadow-md"
-          >
-            <div className="bg-primary/10 group-hover:bg-primary/20 flex h-9 w-9 items-center justify-center rounded-xl transition-colors">
-              <s.icon className="text-primary h-4.5 w-4.5" />
-            </div>
-            <span className="text-ink text-sm font-medium">{s.label}</span>
-            <span className="text-ink-tertiary text-xs">{s.desc}</span>
-          </button>
-        ))}
-      </div>
     </div>
   );
 });

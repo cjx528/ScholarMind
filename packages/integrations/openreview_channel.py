@@ -19,7 +19,7 @@ class OpenReviewChannel(ChannelBase):
         return self._client.search_papers(query, max_results=max_results)
 
     def download_pdf(self, paper_id: str) -> str | None:
-        return None
+        return self._client.download_pdf(paper_id)
 
     def supports_incremental(self) -> bool:
         return True

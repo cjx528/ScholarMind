@@ -3,6 +3,8 @@
 """
 
 import json
+import re
+from difflib import SequenceMatcher
 from pathlib import Path
 from uuid import UUID
 
@@ -57,6 +59,52 @@ def _remove_local_pdf(pdf_path: str | None) -> tuple[bool, str | None]:
         return True, None
     except OSError as exc:
         return False, str(exc)
+
+
+def _valid_arxiv_id(arxiv_id: str | None) -> bool:
+    return bool(arxiv_id and not arxiv_id.startswith("ss-") and ":" not in arxiv_id)
+
+
+def _normalize_title_for_match(title: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
+
+
+def _title_similarity(a: str | None, b: str | None) -> float:
+    left = _normalize_title_for_match(a)
+    right = _normalize_title_for_match(b)
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    if left in right or right in left:
+        return 0.92
+    return SequenceMatcher(None, left, right).ratio()
+
+
+def _find_arxiv_match_by_title(title: str):
+    from packages.integrations.arxiv_client import ArxivClient
+
+    clean_title = " ".join((title or "").split())
+    if not clean_title:
+        return None
+    client = ArxivClient()
+    quoted = clean_title.replace('"', "")
+    queries = [f'ti:"{quoted}"', f'"{quoted}"', clean_title]
+    best = None
+    best_score = 0.0
+    for query in queries:
+        try:
+            candidates = client.fetch_latest(query, max_results=5, sort_by="relevance")
+        except Exception:
+            continue
+        for candidate in candidates:
+            score = _title_similarity(title, candidate.title)
+            if score > best_score:
+                best = candidate
+                best_score = score
+        if best_score >= 0.88:
+            return best
+    return best if best_score >= 0.82 else None
 
 
 @router.get("/papers/folder-stats")
@@ -380,8 +428,9 @@ def toggle_favorite(paper_id: UUID) -> dict:
 
 @router.post("/papers/{paper_id}/download-pdf")
 def download_paper_pdf(paper_id: UUID) -> dict:
-    """从 arXiv 下载论文 PDF"""
+    """下载论文 PDF：优先 arXiv，其次 OpenReview 原文，再按标题匹配 arXiv。"""
     from packages.integrations.arxiv_client import ArxivClient
+    from packages.integrations.openreview_client import OpenReviewClient
 
     with session_scope() as session:
         repo = PaperRepository(session)
@@ -391,14 +440,52 @@ def download_paper_pdf(paper_id: UUID) -> dict:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if paper.pdf_path and Path(paper.pdf_path).exists():
             return {"status": "exists", "pdf_path": paper.pdf_path}
-        if not paper.arxiv_id or paper.arxiv_id.startswith("ss-"):
-            raise HTTPException(status_code=400, detail="该论文没有有效的 arXiv ID，无法下载 PDF")
-        try:
-            pdf_path = ArxivClient().download_pdf(paper.arxiv_id)
-            repo.set_pdf_path(paper_id, pdf_path)
-            return {"status": "downloaded", "pdf_path": pdf_path}
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"PDF 下载失败: {exc}") from exc
+        metadata = dict(paper.metadata_json or {})
+        errors: list[str] = []
+
+        if _valid_arxiv_id(paper.arxiv_id):
+            try:
+                pdf_path = ArxivClient().download_pdf(paper.arxiv_id)
+                repo.set_pdf_path(paper_id, pdf_path)
+                return {"status": "downloaded", "pdf_path": pdf_path, "source": "arxiv"}
+            except Exception as exc:
+                errors.append(f"arXiv 下载失败: {exc}")
+
+        source = str(metadata.get("source") or "").lower()
+        openreview_id = (
+            str(metadata.get("source_id") or metadata.get("forum") or metadata.get("openreview_id") or "")
+            or (paper.arxiv_id.removeprefix("openreview:") if paper.arxiv_id else "")
+        ).strip()
+        if source == "openreview" or (paper.arxiv_id or "").startswith("openreview:"):
+            try:
+                pdf_path = OpenReviewClient().download_pdf(
+                    openreview_id,
+                    pdf_url=str(metadata.get("pdf_url") or ""),
+                )
+                repo.set_pdf_path(paper_id, pdf_path)
+                return {"status": "downloaded", "pdf_path": pdf_path, "source": "openreview"}
+            except Exception as exc:
+                errors.append(f"OpenReview PDF 下载失败: {exc}")
+
+        arxiv_match = _find_arxiv_match_by_title(paper.title)
+        if arxiv_match and arxiv_match.arxiv_id:
+            try:
+                pdf_path = ArxivClient().download_pdf(arxiv_match.arxiv_id)
+                repo.set_pdf_path(paper_id, pdf_path)
+                metadata["arxiv_pdf_id"] = arxiv_match.arxiv_id
+                metadata["arxiv_pdf_match_title"] = arxiv_match.title
+                paper.metadata_json = metadata
+                return {
+                    "status": "downloaded",
+                    "pdf_path": pdf_path,
+                    "source": "arxiv_title_match",
+                    "arxiv_id": arxiv_match.arxiv_id,
+                }
+            except Exception as exc:
+                errors.append(f"arXiv 标题匹配下载失败: {exc}")
+
+        detail = "；".join(errors) if errors else "该论文没有可下载 PDF，且未在 arXiv 找到高置信匹配"
+        raise HTTPException(status_code=400, detail=detail)
 
 
 @router.get("/papers/{paper_id}/pdf")

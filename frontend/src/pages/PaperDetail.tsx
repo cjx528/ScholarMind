@@ -97,6 +97,11 @@ function isArxivPaper(paper: Paper): boolean {
   );
 }
 
+function isOpenReviewPaper(paper: Paper): boolean {
+  const source = paperSource(paper);
+  return source === "openreview" || Boolean(paper.arxiv_id?.startsWith(OPENREVIEW_PREFIX));
+}
+
 function externalPaperLink(paper: Paper): { href: string; label: string } | null {
   const source = paperSource(paper);
   if (source === "openreview" || paper.arxiv_id?.startsWith(OPENREVIEW_PREFIX)) {
@@ -678,6 +683,14 @@ export default function PaperDetail() {
       ? "done"
       : "idle";
   const canUseArxivPdf = isArxivPaper(paper);
+  const canDownloadPdf = canUseArxivPdf || isOpenReviewPaper(paper) || Boolean(!paper.pdf_path);
+  const pdfDownloadLabel = paper.pdf_path
+    ? "已下载"
+    : canUseArxivPdf
+      ? "从 arXiv 获取"
+      : isOpenReviewPaper(paper)
+        ? "从 OpenReview 获取"
+        : "尝试匹配 arXiv";
   const externalLink = externalPaperLink(paper);
 
   return (
@@ -895,11 +908,11 @@ export default function PaperDetail() {
                 toast("error", e instanceof Error ? e.message : "PDF 下载失败");
               }
             }}
-            disabled={!canUseArxivPdf}
+            disabled={!canDownloadPdf}
             className="border-border bg-surface hover:border-primary/30 flex items-center gap-3 rounded-2xl border p-4 transition-all hover:shadow-md disabled:opacity-50"
             title={
-              !canUseArxivPdf
-                ? "该论文没有有效的 arXiv ID，无法下载 PDF"
+              !canDownloadPdf
+                ? "该论文没有可用的 PDF 下载来源"
                 : "下载 PDF 到本地存储"
             }
           >
@@ -909,7 +922,7 @@ export default function PaperDetail() {
             <div className="text-left">
               <p className="text-ink text-sm font-semibold">下载 PDF</p>
               <p className="text-ink-tertiary text-xs">
-                {paper.pdf_path ? "已下载" : canUseArxivPdf ? "从 arXiv 获取" : "不可用"}
+                {pdfDownloadLabel}
               </p>
             </div>
           </button>

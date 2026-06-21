@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from packages.config import get_settings
 from packages.domain.schemas import PaperCreate
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,11 @@ def _matches_query(paper: PaperCreate, query: str) -> bool:
     return any(term in haystack for term in terms)
 
 
+def _safe_pdf_stem(value: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())[:120].strip("._")
+    return stem or "openreview-paper"
+
+
 class OpenReviewClient:
     """Small REST client for public OpenReview paper search."""
 
@@ -227,6 +233,31 @@ class OpenReviewClient:
         if query:
             papers = [paper for paper in papers if _matches_query(paper, query)]
         return papers[:max_results]
+
+    def download_pdf(self, paper_id: str, pdf_url: str | None = None) -> str:
+        """Download a public OpenReview PDF by forum/note id or explicit PDF URL."""
+        clean_id = _norm(paper_id).removeprefix("openreview:")
+        if not clean_id and not pdf_url:
+            raise ValueError("OpenReview paper id or PDF URL is required")
+
+        url = _norm(pdf_url)
+        if url and url.startswith("/"):
+            url = f"https://openreview.net{url}"
+        if not url:
+            url = f"https://openreview.net/pdf?id={clean_id}"
+
+        settings = get_settings()
+        target = settings.pdf_storage_root / f"openreview-{_safe_pdf_stem(clean_id or url)}.pdf"
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        response = self.client.get(url, timeout=90)
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "").lower()
+        content = response.content
+        if "pdf" not in content_type and not content.lstrip().startswith(b"%PDF"):
+            raise RuntimeError("OpenReview did not return a PDF")
+        target.write_bytes(content)
+        return str(target)
 
     def _submission_invitation_for_venue(self, venue_id: str) -> str:
         data = self._get("/groups", params={"id": venue_id})
