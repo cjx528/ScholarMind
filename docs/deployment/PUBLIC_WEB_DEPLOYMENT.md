@@ -4,6 +4,23 @@ This project can be deployed as one public web service: React static files,
 Nginx, FastAPI, the background worker, SQLite, and PDF storage all run from one
 Docker image.
 
+## Recommended long-term deployment
+
+For a public link that can be shared long term without Render payment setup, use
+the VPS Docker guide:
+
+```text
+docs/deployment/VPS_DOCKER_DEPLOYMENT.md
+```
+
+That path runs the published Docker image on your own server. The final link is
+either:
+
+```text
+http://SERVER_IP/
+https://your-domain.example/
+```
+
 ## One-click Render deployment
 
 Use this link:

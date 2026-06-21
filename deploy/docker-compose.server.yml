@@ -1,0 +1,29 @@
+name: scholarmind
+
+services:
+  scholarmind:
+    image: ${SCHOLARMIND_IMAGE:-ghcr.io/cjx528/scholarmind:latest}
+    container_name: scholarmind-web
+    restart: unless-stopped
+    env_file:
+      - ./.env.server
+    environment:
+      PORT: "8080"
+      DATABASE_URL: sqlite:////app/data/scholarmind.db
+      PDF_STORAGE_ROOT: /app/data/papers
+      CORS_ALLOW_ORIGINS: ${PUBLIC_ORIGIN:-*}
+    ports:
+      - "${SCHOLARMIND_HTTP_PORT:-80}:8080"
+    volumes:
+      - scholarmind_data:/app/data
+      - scholarmind_logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+volumes:
+  scholarmind_data:
+  scholarmind_logs:

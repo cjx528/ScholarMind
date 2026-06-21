@@ -1,0 +1,4 @@
+{$SCHOLARMIND_DOMAIN} {
+    encode gzip zstd
+    reverse_proxy scholarmind:8080
+}
