@@ -24,10 +24,10 @@ else
     echo "[$(date)] WARNING: DB file not found at $DB_FILE"
 fi
 
-# PDF 和 Briefs 增量打包
-if [ -d "$DATA_DIR/papers" ] || [ -d "$DATA_DIR/briefs" ]; then
+# PDF 增量打包
+if [ -d "$DATA_DIR/papers" ]; then
     tar -czf "$BACKUP_DIR/papers_$DATE.tar.gz" \
-        -C "$DATA_DIR" papers/ briefs/ 2>/dev/null || true
+        -C "$DATA_DIR" papers/ 2>/dev/null || true
     echo "[$(date)] Files backup: papers_$DATE.tar.gz"
 fi
 

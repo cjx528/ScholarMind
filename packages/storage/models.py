@@ -208,8 +208,6 @@ class TopicSubscription(Base):
     )  # 日期范围（最近 N 天）
 
     intent_profile_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    last_radar_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    last_radar_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

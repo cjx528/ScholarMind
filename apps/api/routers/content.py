@@ -1,4 +1,4 @@
-"""Wiki / 生成内容 / 趋势路由
+"""Wiki / 生成内容路由
 @author ScholarMind Team
 """
 
@@ -202,24 +202,3 @@ def generated_delete(content_id: str) -> dict:
             raise HTTPException(status_code=404, detail="Content not found") from exc
         repo.delete(content_id)
     return {"deleted": content_id}
-
-
-# ---------- 推荐 & 趋势 ----------
-
-
-@router.get("/trends/hot")
-def hot_keywords(
-    days: int = Query(default=7, ge=1, le=30),
-    top_k: int = Query(default=15, ge=1, le=50),
-) -> dict:
-    from packages.ai.recommendation_service import TrendService
-
-    items = TrendService().detect_hot_keywords(days=days, top_k=top_k)
-    return {"items": items}
-
-
-@router.get("/trends/emerging")
-def emerging_trends(days: int = Query(default=14, ge=7, le=60)) -> dict:
-    from packages.ai.recommendation_service import TrendService
-
-    return TrendService().detect_trends(days=days)

@@ -518,7 +518,7 @@ export function AgentSessionProvider({ children }: { children: React.ReactNode }
               ]);
               setCanvas({ title: artTitle, markdown: artContent });
             } else if (d.html) {
-              const artTitle = String(d.title || "Daily Brief");
+              const artTitle = String(d.title || "HTML Artifact");
               const artContent = String(d.html);
               setItems((prev) => [
                 ...prev,

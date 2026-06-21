@@ -312,7 +312,6 @@
 - 主题 Wiki：输入关键词生成主题级 Wiki。
 - 异步 Wiki：主题 Wiki 和论文 Wiki 都通过任务系统生成并轮询状态。
 - 并行生成：主题 Wiki 与论文 Wiki 可以同时生成，页面分别保留进度。
-- 热点趋势：获取热门趋势和新兴趋势。
 - 生成内容历史：查看已生成的 Wiki 等内容。
 - 内容详情：点击历史项查看完整内容。
 - 删除历史内容：删除不再需要的生成内容。
@@ -324,8 +323,6 @@
 - `GET /wiki/topic`
 - `POST /tasks/wiki/topic`
 - `POST /tasks/wiki/paper/{paper_id}`
-- `GET /trends/hot`
-- `GET /trends/emerging`
 - `GET /generated/list`
 - `GET /generated/{content_id}`
 - `DELETE /generated/{content_id}`

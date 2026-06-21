@@ -1585,7 +1585,7 @@ class AppSettingsRepository:
 
 
 class GeneratedContentRepository:
-    """持久化生成内容（Wiki / Brief）"""
+    """持久化生成内容（Wiki）"""
 
     def __init__(self, session: Session):
         self.session = session

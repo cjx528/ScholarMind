@@ -54,8 +54,6 @@ export interface Topic {
   schedule_time_utc: number;
   enable_date_filter: boolean;
   date_filter_days: number;
-  last_radar?: Record<string, unknown>;
-  last_radar_at?: string | null;
   paper_count?: number;
   last_run_at?: string | null;
   last_run_count?: number | null;

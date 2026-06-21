@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   Loader2,
   Plus,
-  Radar,
   Save,
   Wand2,
 } from "lucide-react";
@@ -295,7 +294,7 @@ export default function Compass() {
         <header className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-primary">
-              <Radar className="h-4 w-4" />
+              <Brain className="h-4 w-4" />
               Scholar Profile
             </div>
             <h1 className="text-2xl font-semibold text-ink">用户画像</h1>

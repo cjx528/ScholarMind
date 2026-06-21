@@ -35,7 +35,7 @@ RUN pip install --cache-dir=/.pip-cache ".[llm,pdf]" \
     -i https://mirrors.aliyun.com/pypi/simple/
 
 # 创建数据目录和日志目录
-RUN mkdir -p /app/data/papers /app/data/briefs /app/logs
+RUN mkdir -p /app/data/papers /app/logs
 
 # 强制设置数据库路径（避免环境变量冲突问题）
 ENV DATABASE_URL=sqlite:////app/data/scholarmind.db

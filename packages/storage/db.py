@@ -339,8 +339,6 @@ def run_migrations() -> None:
         _safe_add_column(conn, "topic_subscriptions", "sources", "JSON", """'["arxiv"]'""")
         _safe_add_column(conn, "topic_subscriptions", "paused", "BOOLEAN", "0")
         _safe_add_column(conn, "topic_subscriptions", "intent_profile_json", "JSON", "'{}'")
-        _safe_add_column(conn, "topic_subscriptions", "last_radar_json", "JSON", "'{}'")
-        _safe_add_nullable_column(conn, "topic_subscriptions", "last_radar_at", "DATETIME")
         if "daily_limit" in topic_cols_before and "max_results_per_run" not in topic_cols_before:
             try:
                 conn.execute(

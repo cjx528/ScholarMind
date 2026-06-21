@@ -49,7 +49,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // 检查工具网格
   const toolLinks = await page.$$(
-    "a[href='/recommendation'], a[href='/radar'], a[href='/papers'], a[href='/collect'], a[href='/wiki'], a[href='/brief'], a[href='/dashboard'], a[href='/statistics']"
+    "a[href='/recommendation'], a[href='/papers'], a[href='/collect'], a[href='/wiki'], a[href='/dashboard'], a[href='/statistics']"
   );
   toolLinks.length >= 4 ? pass(`工具导航链接: ${toolLinks.length} 个`) : fail(`工具导航链接不足: ${toolLinks.length}`);
 
@@ -151,19 +151,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     ? pass("论文收集页面加载正常")
     : fail("论文收集页面标题异常");
 
-  // ========== 5. Radar 研究雷达 ==========
-  console.log("\n=== 5. Radar 研究雷达 (/radar) ===");
-  await page.goto(`${BASE}/radar`, { waitUntil: "networkidle" });
-  await wait(800);
-  await shot(page, "radar");
-
-  const radarBody = await page.textContent("body");
-  radarBody.includes("雷达") || radarBody.includes("Radar") || radarBody.includes("精读")
-    ? pass("研究雷达页面加载正常")
-    : fail("研究雷达页面异常");
-
-  // ========== 6. Wiki ==========
-  console.log("\n=== 6. Wiki (/wiki) ===");
+  // ========== 5. Wiki ==========
+  console.log("\n=== 5. Wiki (/wiki) ===");
   await page.goto(`${BASE}/wiki`, { waitUntil: "networkidle" });
   await wait(800);
   await shot(page, "wiki");
@@ -173,19 +162,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     ? pass("Wiki 页面加载正常")
     : fail("Wiki 页面异常");
 
-  // ========== 7. Brief 研究简报 ==========
-  console.log("\n=== 7. Brief 研究简报 (/brief) ===");
-  await page.goto(`${BASE}/brief`, { waitUntil: "networkidle" });
-  await wait(800);
-  await shot(page, "brief");
-
-  const briefBody = await page.textContent("body");
-  briefBody.includes("简报") || briefBody.includes("Brief")
-    ? pass("研究简报页面加载正常")
-    : fail("研究简报页面异常");
-
-  // ========== 8. Dashboard 看板 ==========
-  console.log("\n=== 8. Dashboard 看板 (/dashboard) ===");
+  // ========== 6. Dashboard 看板 ==========
+  console.log("\n=== 6. Dashboard 看板 (/dashboard) ===");
   await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
   await wait(800);
   await shot(page, "dashboard");
@@ -195,20 +173,20 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     ? pass("看板页面加载正常")
     : fail("看板页面异常");
 
-  // ========== 9. 404 测试 ==========
-  console.log("\n=== 9. 404 路径测试 ===");
-  await page.goto(`${BASE}/briefs`, { waitUntil: "networkidle" });
+  // ========== 7. 404 测试 ==========
+  console.log("\n=== 7. 404 路径测试 ===");
+  await page.goto(`${BASE}/nonexistent-page`, { waitUntil: "networkidle" });
   await wait(500);
   const body404 = await page.textContent("body");
   if (body404.includes("404") || body404.includes("not found") || body404.includes("Not Found")) {
-    pass("/briefs 正确返回 404");
+    pass("未知路径正确返回 404");
   } else {
-    log("/briefs 未显示 404（可能有默认路由重定向）");
-    await shot(page, "briefs-404-check");
+    log("未知路径未显示 404（可能有默认路由重定向）");
+    await shot(page, "not-found-check");
   }
 
-  // ========== 10. 暗色主题测试 ==========
-  console.log("\n=== 10. 暗色主题切换 ===");
+  // ========== 8. 暗色主题测试 ==========
+  console.log("\n=== 8. 暗色主题切换 ===");
   await page.goto(BASE, { waitUntil: "networkidle" });
   await wait(500);
 

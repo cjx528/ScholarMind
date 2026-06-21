@@ -368,8 +368,6 @@ def _topic_dict(t, session=None) -> dict:
         "schedule_time_utc": getattr(t, "schedule_time_utc", 21),
         "enable_date_filter": getattr(t, "enable_date_filter", False),
         "date_filter_days": getattr(t, "date_filter_days", 7),
-        "last_radar": getattr(t, "last_radar_json", None) or {},
-        "last_radar_at": t.last_radar_at.isoformat() if getattr(t, "last_radar_at", None) else None,
         "paper_count": 0,
         "last_run_at": None,
         "last_run_count": None,

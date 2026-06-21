@@ -1,42 +1,13 @@
-"""
-推荐引擎 + 热点趋势检测
+"""Recommendation service.
+
 @author ScholarMind Team
 """
 
 from __future__ import annotations
 
-import logging
-import threading
-import time
-from collections import Counter
-from datetime import UTC, datetime, timedelta
-
+from packages.domain.math_utils import cosine_similarity as _cosine_sim
 from packages.storage.db import session_scope
 from packages.storage.repositories import PaperRepository
-
-logger = logging.getLogger(__name__)
-
-# 简单的 TTL 内存缓存
-_ttl_cache: dict[str, tuple[float, object]] = {}
-_ttl_lock = threading.Lock()
-_DEFAULT_TTL = 300  # 5 分钟
-
-
-def _cached(key: str, ttl: float = _DEFAULT_TTL):
-    """读取缓存，命中返回值，未命中返回 None"""
-    with _ttl_lock:
-        entry = _ttl_cache.get(key)
-        if entry and time.monotonic() - entry[0] < ttl:
-            return entry[1]
-    return None
-
-
-def _set_cache(key: str, value: object):
-    with _ttl_lock:
-        _ttl_cache[key] = (time.monotonic(), value)
-
-
-from packages.domain.math_utils import cosine_similarity as _cosine_sim
 
 
 def _mean_vector(vectors: list[list[float]]) -> list[float]:
@@ -113,87 +84,3 @@ class RecommendationService:
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [item for _, item in scored[:top_k]]
-
-
-class TrendService:
-    """热点趋势检测"""
-
-    @staticmethod
-    def _extract_metadata(papers: list) -> list[dict]:
-        """在 session 内提取论文的 metadata_json"""
-        return [p.metadata_json or {} for p in papers]
-
-    def detect_hot_keywords(self, days: int = 7, top_k: int = 15) -> list[dict]:
-        """分析近 N 天论文的关键词频率（5 分钟缓存）"""
-        cache_key = f"hot_keywords:{days}:{top_k}"
-        hit = _cached(cache_key)
-        if hit is not None:
-            return hit
-        cutoff = datetime.now(UTC) - timedelta(days=days)
-        with session_scope() as session:
-            repo = PaperRepository(session)
-            recent = repo.list_recent_since(cutoff, limit=500)
-            metas = self._extract_metadata(recent)
-
-        keyword_counter: Counter[str] = Counter()
-        for meta in metas:
-            for kw in meta.get("keywords", []):
-                keyword_counter[kw.lower()] += 1
-            for cat in meta.get("categories", []):
-                keyword_counter[cat] += 1
-
-        result = [
-            {"keyword": kw, "count": count} for kw, count in keyword_counter.most_common(top_k)
-        ]
-        _set_cache(cache_key, result)
-        return result
-
-    def detect_trends(self, days: int = 14) -> dict:
-        """对比近期 vs 更早期的关键词变化"""
-        now = datetime.now(UTC)
-        recent_cutoff = now - timedelta(days=days // 2)
-        old_cutoff = now - timedelta(days=days)
-
-        with session_scope() as session:
-            repo = PaperRepository(session)
-            recent_papers = repo.list_recent_since(recent_cutoff, limit=500)
-            older_papers = repo.list_recent_between(old_cutoff, recent_cutoff, limit=500)
-            recent_metas = self._extract_metadata(recent_papers)
-            older_metas = self._extract_metadata(older_papers)
-            recent_count = len(recent_papers)
-            older_count = len(older_papers)
-
-        def count_keywords(metas: list[dict]) -> Counter:
-            c: Counter[str] = Counter()
-            for meta in metas:
-                for kw in meta.get("keywords", []):
-                    c[kw.lower()] += 1
-            return c
-
-        recent_kw = count_keywords(recent_metas)
-        older_kw = count_keywords(older_metas)
-
-        emerging = []
-        for kw, count in recent_kw.most_common(30):
-            old_count = older_kw.get(kw, 0)
-            if count >= 2 and (old_count == 0 or count / max(old_count, 1) >= 1.5):
-                emerging.append(
-                    {
-                        "keyword": kw,
-                        "recent_count": count,
-                        "previous_count": old_count,
-                        "growth": (
-                            "新出现"
-                            if old_count == 0
-                            else f"+{round((count / old_count - 1) * 100)}%"
-                        ),
-                    }
-                )
-
-        return {
-            "period_days": days,
-            "recent_paper_count": recent_count,
-            "older_paper_count": older_count,
-            "hot_keywords": [{"keyword": kw, "count": c} for kw, c in recent_kw.most_common(10)],
-            "emerging_trends": emerging[:10],
-        }

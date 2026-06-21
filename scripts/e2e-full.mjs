@@ -56,19 +56,13 @@ const info = (msg) => console.log(`  ℹ️  ${msg}`);
   logo.includes("论文总量") ? pass("统计卡片: 论文总量") : fail("统计卡片缺失");
   logo.includes("本周新增") ? pass("统计卡片: 本周新增") : fail("统计卡片: 本周新增缺失");
 
-  // 检查推荐论文
-  logo.includes("为你推荐") ? pass("推荐论文区域存在") : fail("推荐论文区域缺失");
-
-  // 检查本周热点
-  logo.includes("本周热点") ? pass("本周热点存在") : fail("本周热点缺失");
-
   // 检查能力卡片
   for (const cap of ["搜索调研", "下载论文", "论文分析"]) {
     logo.includes(cap) ? pass(`能力卡片: ${cap}`) : fail(`能力卡片缺失: ${cap}`);
   }
 
   // 检查快捷按钮
-  for (const btn of ["搜索论文", "下载入库", "知识问答", "生成 Wiki", "生成简报"]) {
+  for (const btn of ["搜索论文", "下载入库", "知识问答", "生成 Wiki"]) {
     logo.includes(btn) ? pass(`快捷按钮: ${btn}`) : fail(`快捷按钮缺失: ${btn}`);
   }
 
@@ -78,7 +72,7 @@ const info = (msg) => console.log(`  ℹ️  ${msg}`);
 
   // 侧边栏工具网格
   const toolGrid = await page.$$(
-    "a[href='/recommendation'], a[href='/radar'], a[href='/collect'], a[href='/papers'], a[href='/wiki'], a[href='/brief'], a[href='/dashboard'], a[href='/statistics']"
+    "a[href='/recommendation'], a[href='/collect'], a[href='/papers'], a[href='/wiki'], a[href='/dashboard'], a[href='/statistics']"
   );
   toolGrid.length >= 6 ? pass(`侧边栏工具导航: ${toolGrid.length} 个`) : fail(`侧边栏工具导航不足: ${toolGrid.length}`);
 
@@ -291,25 +285,10 @@ const info = (msg) => console.log(`  ℹ️  ${msg}`);
   }
 
   // ========================================================================
-  // TEST 6: Daily Radar 研究雷达
+  // TEST 6: Wiki
   // ========================================================================
   console.log("\n" + "=".repeat(60));
-  console.log("TEST 6: Daily Radar 研究雷达 (/radar)");
-  console.log("=".repeat(60));
-  await page.goto(`${BASE}/radar`, { waitUntil: "networkidle" });
-  await wait(800);
-  await shot(page, "09-radar");
-
-  const radarBody = await page.textContent("body");
-  radarBody.includes("研究雷达") || radarBody.includes("Radar") ? pass("页面标题: 研究雷达") : fail("页面标题异常");
-  radarBody.includes("精读") || radarBody.includes("速读") || radarBody.includes("跳过")
-    ? pass("雷达分区文案存在") : info("雷达分区文案未显示，可能暂无推荐结果");
-
-  // ========================================================================
-  // TEST 7: Wiki
-  // ========================================================================
-  console.log("\n" + "=".repeat(60));
-  console.log("TEST 7: Wiki (/wiki)");
+  console.log("TEST 6: Wiki (/wiki)");
   console.log("=".repeat(60));
   await page.goto(`${BASE}/wiki`, { waitUntil: "networkidle" });
   await wait(800);
@@ -331,29 +310,10 @@ const info = (msg) => console.log(`  ℹ️  ${msg}`);
   }
 
   // ========================================================================
-  // TEST 8: Brief 研究简报
+  // TEST 7: Dashboard 看板
   // ========================================================================
   console.log("\n" + "=".repeat(60));
-  console.log("TEST 8: Brief 研究简报 (/brief)");
-  console.log("=".repeat(60));
-  await page.goto(`${BASE}/brief`, { waitUntil: "networkidle" });
-  await wait(800);
-  await shot(page, "13-brief");
-
-  const briefBody = await page.textContent("body");
-  briefBody.includes("研究简报") ? pass("页面标题: 研究简报") : fail("页面标题异常");
-  briefBody.includes("生成简报") ? pass("生成简报按钮") : fail("生成简报按钮缺失");
-  briefBody.includes("历史简报") ? pass("历史简报列表") : fail("历史简报列表缺失");
-
-  // 检查已有简报
-  const briefCount = (briefBody.match(/Daily Brief/g) || []).length;
-  briefCount > 0 ? pass(`历史简报: ${briefCount} 条`) : info("无历史简报");
-
-  // ========================================================================
-  // TEST 9: Dashboard 看板
-  // ========================================================================
-  console.log("\n" + "=".repeat(60));
-  console.log("TEST 9: Dashboard 看板 (/dashboard)");
+  console.log("TEST 7: Dashboard 看板 (/dashboard)");
   console.log("=".repeat(60));
   await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
   await wait(1000);
@@ -375,10 +335,10 @@ const info = (msg) => console.log(`  ℹ️  ${msg}`);
   dashBody.includes("Token 用量") || dashBody.includes("Token") ? pass("Token 用量统计") : fail("Token 用量缺失");
 
   // ========================================================================
-  // TEST 10: Settings 设置
+  // TEST 8: Settings 设置
   // ========================================================================
   console.log("\n" + "=".repeat(60));
-  console.log("TEST 10: Settings 设置");
+  console.log("TEST 8: Settings 设置");
   console.log("=".repeat(60));
 
   // 通过侧边栏底部设置按钮进入
@@ -403,10 +363,10 @@ const info = (msg) => console.log(`  ℹ️  ${msg}`);
   }
 
   // ========================================================================
-  // TEST 11: 404 页面
+  // TEST 9: 404 页面
   // ========================================================================
   console.log("\n" + "=".repeat(60));
-  console.log("TEST 11: 404 页面");
+  console.log("TEST 9: 404 页面");
   console.log("=".repeat(60));
   await page.goto(`${BASE}/nonexistent-page`, { waitUntil: "networkidle" });
   await wait(500);
@@ -416,10 +376,10 @@ const info = (msg) => console.log(`  ℹ️  ${msg}`);
   body404.includes("返回首页") ? pass("返回首页按钮") : fail("返回首页按钮缺失");
 
   // ========================================================================
-  // TEST 12: 暗色主题
+  // TEST 10: 暗色主题
   // ========================================================================
   console.log("\n" + "=".repeat(60));
-  console.log("TEST 12: 暗色主题切换");
+  console.log("TEST 10: 暗色主题切换");
   console.log("=".repeat(60));
   await page.goto(BASE, { waitUntil: "networkidle" });
   await wait(500);
@@ -457,10 +417,10 @@ const info = (msg) => console.log(`  ℹ️  ${msg}`);
   }
 
   // ========================================================================
-  // TEST 13: 响应式 - 缩小视口
+  // TEST 11: 响应式 - 缩小视口
   // ========================================================================
   console.log("\n" + "=".repeat(60));
-  console.log("TEST 13: 移动端响应式");
+  console.log("TEST 11: 移动端响应式");
   console.log("=".repeat(60));
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto(BASE, { waitUntil: "networkidle" });
