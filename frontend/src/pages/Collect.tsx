@@ -28,6 +28,16 @@ import type { ArxivPreviewCandidate, ArxivPreviewResponse, IngestPaper } from "@
 type SortBy = "submittedDate" | "relevance" | "lastUpdatedDate";
 type RecencyPreference = "recent" | "balanced" | "classic";
 
+const DEFAULT_MAX_RESULTS = 20;
+
+function parseMaxResultsInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return DEFAULT_MAX_RESULTS;
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_MAX_RESULTS;
+  return Math.max(1, Math.min(100, parsed));
+}
+
 interface SourceOption {
   id: string;
   label: string;
@@ -127,7 +137,7 @@ export default function Collect() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [query, setQuery] = useState("");
-  const [maxResults, setMaxResults] = useState(20);
+  const [maxResultsInput, setMaxResultsInput] = useState(String(DEFAULT_MAX_RESULTS));
   const [selectedSources, setSelectedSources] = useState<string[]>(["arxiv"]);
   const [recencyPreference, setRecencyPreference] = useState<RecencyPreference>("recent");
   const [sortBy, setSortBy] = useState<SortBy>("submittedDate");
@@ -141,6 +151,7 @@ export default function Collect() {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const recencyFilter = RECENCY_FILTERS[recencyPreference];
+  const maxResults = useMemo(() => parseMaxResultsInput(maxResultsInput), [maxResultsInput]);
   const candidates = useMemo(() => preview?.candidates ?? [], [preview]);
   const selectedCandidates = useMemo(
     () => candidates.filter((item) => selectedCandidateIds.has(candidateId(item))),
@@ -340,13 +351,14 @@ export default function Collect() {
                   数量
                 </span>
                 <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={maxResults}
-                  onChange={(event) =>
-                    setMaxResults(Math.max(1, Math.min(100, Number(event.target.value) || 20)))
-                  }
+                  type="text"
+                  inputMode="numeric"
+                  value={maxResultsInput}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    if (/^\s*\d{0,3}\s*$/.test(next)) setMaxResultsInput(next);
+                  }}
+                  onBlur={() => setMaxResultsInput(String(maxResults))}
                   className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm text-ink outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                 />
               </label>
