@@ -4,7 +4,7 @@
 
 from fastapi import APIRouter, HTTPException, Query
 
-from apps.api.deps import cache, graph_service, iso_dt
+from apps.api.deps import graph_service, iso_dt
 from packages.ai.graph_service import repair_topic_wiki_payload
 from packages.domain.task_tracker import global_tracker
 from packages.storage.db import session_scope
@@ -146,7 +146,7 @@ def start_paper_wiki_task(paper_id: str) -> dict:
 
 @router.get("/generated/list")
 def generated_list(
-    type: str = Query(..., description="content_type: topic_wiki|paper_wiki|daily_radar"),
+    type: str = Query(..., description="content_type: topic_wiki|paper_wiki"),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict:
     with session_scope() as session:
@@ -223,16 +223,3 @@ def emerging_trends(days: int = Query(default=14, ge=7, le=60)) -> dict:
     from packages.ai.recommendation_service import TrendService
 
     return TrendService().detect_trends(days=days)
-
-
-@router.get("/today")
-def today_summary() -> dict:
-    """今日研究速览（60s 缓存，内容变化慢）"""
-    cached = cache.get("today_summary")
-    if cached is not None:
-        return cached
-    from packages.ai.recommendation_service import TrendService
-
-    result = TrendService().get_today_summary()
-    cache.set("today_summary", result, ttl=60)
-    return result

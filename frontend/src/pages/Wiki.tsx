@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from "react";
 import { Card, CardHeader, Button, Tabs, Spinner, Empty } from "@/components/ui";
 import { generatedApi, tasksApi } from "@/services/api";
+import { useGlobalTasks } from "@/contexts/GlobalTaskContext";
 import type {
   PaperWiki,
   TopicWiki,
@@ -17,6 +18,7 @@ import type {
   GeneratedContentListItem,
   GeneratedContent,
   TaskStatus,
+  ActiveTaskInfo,
 } from "@/types";
 const Markdown = lazy(() => import("@/components/Markdown"));
 import {
@@ -53,6 +55,7 @@ type ActiveWikiTask = {
   contentType: "topic_wiki" | "paper_wiki";
   keyword?: string;
   paperId?: string;
+  label?: string;
 };
 
 type ActiveWikiTaskMap = Partial<Record<WikiTaskKind, ActiveWikiTask>>;
@@ -93,6 +96,18 @@ function validateActiveWikiTask(task: Partial<ActiveWikiTask> | null | undefined
     contentType: task.contentType || contentTypeForWikiKind(task.kind),
     keyword: task.keyword,
     paperId: task.paperId,
+    label: task.label,
+  };
+}
+
+function wikiTaskFromTrackedTask(task: ActiveTaskInfo): ActiveWikiTask | null {
+  if (task.task_type !== "topic_wiki" && task.task_type !== "paper_wiki") return null;
+  const kind: WikiTaskKind = task.task_type === "paper_wiki" ? "paper" : "topic";
+  return {
+    taskId: task.task_id,
+    kind,
+    contentType: contentTypeForWikiKind(kind),
+    label: task.title,
   };
 }
 
@@ -137,6 +152,7 @@ function clearActiveWikiTasks() {
 }
 
 export default function Wiki() {
+  const { tasks: globalTasks } = useGlobalTasks();
   const [activeTab, setActiveTab] = useState("topic");
   const [keyword, setKeyword] = useState("");
   const [paperId, setPaperId] = useState("");
@@ -148,6 +164,7 @@ export default function Wiki() {
   const [taskStates, setTaskStates] = useState<Record<string, WikiTaskState>>({});
   const pollTimerRefs = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const activeTabRef = useRef(activeTab);
+  const handledGlobalWikiTaskIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     return () => {
@@ -302,7 +319,6 @@ export default function Wiki() {
     const savedTasks = readActiveWikiTasks();
     if (savedTasks.length) {
       savedTasks.forEach((task) => pollTask(task));
-      return;
     }
 
     let cancelled = false;
@@ -329,6 +345,33 @@ export default function Wiki() {
     };
   }, [pollTask]);
 
+  useEffect(() => {
+    globalTasks.forEach((trackedTask) => {
+      const task = wikiTaskFromTrackedTask(trackedTask);
+      if (!task) return;
+
+      if (!trackedTask.finished) {
+        handledGlobalWikiTaskIdsRef.current.delete(task.taskId);
+        if (!pollTimerRefs.current[task.taskId]) {
+          pollTask(task);
+        }
+        return;
+      }
+
+      if (handledGlobalWikiTaskIdsRef.current.has(task.taskId)) return;
+      handledGlobalWikiTaskIdsRef.current.add(task.taskId);
+
+      if (trackedTask.success) {
+        void loadTaskResultContent(task, activeTabRef.current === task.kind).finally(() => {
+          removeActiveWikiTask(task);
+          loadHistory(task.contentType);
+        });
+      } else {
+        removeActiveWikiTask(task);
+      }
+    });
+  }, [globalTasks, loadHistory, loadTaskResultContent, pollTask, removeActiveWikiTask]);
+
   const handleQuery = async () => {
     if (activeTaskForTab) return;
     setSelectedContent(null);
@@ -342,6 +385,7 @@ export default function Wiki() {
           kind: "topic",
           contentType: "topic_wiki",
           keyword: cleanKeyword,
+          label: `Wiki: ${cleanKeyword}`,
         };
         setTaskStates((prev) => ({
           ...prev,
@@ -357,6 +401,7 @@ export default function Wiki() {
           kind: "paper",
           contentType: "paper_wiki",
           paperId: cleanPaperId,
+          label: `Paper Wiki: ${cleanPaperId}`,
         };
         setTaskStates((prev) => ({
           ...prev,
@@ -492,7 +537,7 @@ export default function Wiki() {
               {activeTaskList.map((task) => {
                 const state = taskStates[task.taskId] || { progress: 0, message: "处理中..." };
                 const label = task.kind === "topic" ? "主题 Wiki" : "论文 Wiki";
-                const title = task.keyword || task.paperId || task.taskId;
+                const title = task.keyword || task.paperId || task.label || task.taskId;
                 return (
                   <div key={task.taskId} className="rounded-xl border border-border bg-page p-3">
                     <div className="text-ink-secondary flex items-center justify-between gap-3 text-xs">

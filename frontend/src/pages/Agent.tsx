@@ -13,7 +13,6 @@ import {
   Send,
   CheckCircle2,
   XCircle,
-  Loader2,
   AlertTriangle,
   Sparkles,
   Search,
@@ -24,23 +23,16 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
-  Play,
   Square,
   X,
   PanelRightOpen,
-  TrendingUp,
-  Star,
   Hash,
-  Copy,
-  Check,
   RotateCcw,
   ArrowDown,
 } from "lucide-react";
-import { useAgentSession, type ChatItem, type StepItem } from "@/contexts/AgentSessionContext";
-import { todayApi } from "@/services/api";
-import type { TodaySummary } from "@/types";
+import { useAgentSession, type ChatItem } from "@/contexts/AgentSessionContext";
 import { ActionConfirmCard } from "./AgentSteps";
-import { UserMessage, AssistantMessage, StepGroupCard, StepRow } from "./AgentMessages";
+import { UserMessage, AssistantMessage, StepGroupCard } from "./AgentMessages";
 import { ChatNavBar } from "./ChatNavBar";
 
 /* ========== 能力芯片（输入框上方始终显示） ========== */
@@ -453,16 +445,6 @@ export default function Agent() {
 /* ========== 空状态 ========== */
 
 const EmptyState = memo(function EmptyState({ onSelect }: { onSelect: (p: string) => void }) {
-  const navigate = useNavigate();
-  const [today, setToday] = useState<TodaySummary | null>(null);
-
-  useEffect(() => {
-    todayApi
-      .summary()
-      .then(setToday)
-      .catch(() => {});
-  }, []);
-
   return (
     <div className="flex h-full flex-col items-center overflow-y-auto px-4 pt-12 pb-4">
       <div className="bg-primary/10 mb-6 flex h-16 w-16 items-center justify-center rounded-2xl">
@@ -472,80 +454,6 @@ const EmptyState = memo(function EmptyState({ onSelect }: { onSelect: (p: string
       <p className="text-ink-secondary mb-6 max-w-lg text-center text-sm leading-relaxed">
         告诉我你的研究需求，我会自动规划执行步骤：搜索论文、下载、分析、生成综述。
       </p>
-
-      {/* 今日研究速览 */}
-      {today && (today.today_new > 0 || today.week_new > 0 || today.recommendations.length > 0) && (
-        <div className="mb-6 w-full max-w-2xl space-y-4">
-          {/* 统计卡片 */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="border-border bg-surface rounded-xl border p-3 text-center">
-              <div className="text-primary text-2xl font-bold">{today.total_papers}</div>
-              <div className="text-ink-tertiary text-xs">论文总量</div>
-            </div>
-            <div className="border-border bg-surface rounded-xl border p-3 text-center">
-              <div className="text-2xl font-bold text-emerald-500">{today.today_new}</div>
-              <div className="text-ink-tertiary text-xs">今日新增</div>
-            </div>
-            <div className="border-border bg-surface rounded-xl border p-3 text-center">
-              <div className="text-2xl font-bold text-amber-500">{today.week_new}</div>
-              <div className="text-ink-tertiary text-xs">本周新增</div>
-            </div>
-          </div>
-
-          {/* 为你推荐 */}
-          {today.recommendations.length > 0 && (
-            <div className="border-border bg-surface rounded-xl border p-4">
-              <div className="text-ink mb-3 flex items-center gap-2 text-sm font-semibold">
-                <Star className="h-4 w-4 text-amber-500" />
-                为你推荐
-              </div>
-              <div className="space-y-2">
-                {today.recommendations.slice(0, 3).map((r) => (
-                  <button
-                    key={r.id}
-                    onClick={() => navigate(`/papers/${r.id}`)}
-                    className="hover:bg-hover flex w-full items-start gap-3 rounded-lg p-2.5 text-left transition-colors"
-                  >
-                    <div className="bg-primary/10 text-primary mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold">
-                      {Math.round(r.similarity * 100)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-ink line-clamp-1 text-sm leading-snug font-medium">
-                        {r.title}
-                      </div>
-                      {r.title_zh && (
-                        <div className="text-ink-tertiary line-clamp-1 text-xs">{r.title_zh}</div>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 热点关键词 */}
-          {today.hot_keywords.length > 0 && (
-            <div className="border-border bg-surface rounded-xl border p-4">
-              <div className="text-ink mb-3 flex items-center gap-2 text-sm font-semibold">
-                <TrendingUp className="h-4 w-4 text-rose-500" />
-                本周热点
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {today.hot_keywords.map((kw) => (
-                  <span
-                    key={kw.keyword}
-                    className="bg-primary/5 text-ink-secondary inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs"
-                  >
-                    <Hash className="text-primary h-3 w-3" />
-                    {kw.keyword}
-                    <span className="text-primary font-medium">({kw.count})</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* 快捷建议 */}
       <div className="grid w-full max-w-2xl grid-cols-2 gap-3 md:grid-cols-3">
@@ -838,7 +746,7 @@ const ArtifactCard = memo(function ArtifactCard({
   const preview = (
     isHtml
       ? content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")
-      : content.replace(/[#*_`\[\]()>-]/g, "").replace(/\s+/g, " ")
+      : content.replace(/[#*_`[\]()>-]/g, "").replace(/\s+/g, " ")
   )
     .trim()
     .slice(0, 200);

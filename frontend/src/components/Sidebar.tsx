@@ -26,7 +26,6 @@ import {
   BarChart3,
   Loader2,
   LogOut,
-  Radar,
   Sparkles,
   ClipboardCheck,
 } from "lucide-react";
@@ -35,7 +34,6 @@ import { paperApi, clearAuth } from "@/services/api";
 /* 工具网格定义 */
 const TOOLS = [
   { to: "/recommendation", icon: Sparkles, label: "用户画像", accent: true },
-  { to: "/radar", icon: Radar, label: "研究雷达", accent: true },
   { to: "/collect", icon: Search, label: "论文收集", accent: true },
   { to: "/papers", icon: FileText, label: "论文库", accent: false },
   { to: "/wiki", icon: BookOpen, label: "Wiki", accent: false },
@@ -52,7 +50,7 @@ const D_PART_ASSISTANT_GUIDE = `这是 ScholarMind D 部分专用工作对话。
 - Agent 首页与对话流：提问、停止生成、失败重试、工具步骤、确认动作、论文卡片跳转。
 - Wiki：单篇论文 Wiki、主题 Wiki、异步进度、历史详情和删除。
 - 设置与运维：AI 后端、Codex CLI、LLM Provider、SMTP、健康检查。
-- 看板与统计：系统状态、今日摘要、成本分析、Pipeline 记录、主题统计。
+- 看板与统计：系统状态、成本分析、Pipeline 记录、主题统计。
 - 认证、侧边栏、明暗主题、全局任务条。
 
 建议你按页面逐项验收：先写“通过 / 失败 / 未测”，再补一条证据，比如页面路径、按钮行为、错误提示或截图编号。完成后可以让我把记录整理成报告 D 部分的说明段落。`;

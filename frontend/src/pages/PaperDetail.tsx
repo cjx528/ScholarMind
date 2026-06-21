@@ -277,16 +277,6 @@ export default function PaperDetail() {
   const skimAbort = useRef<AbortController | null>(null);
   const deepAbort = useRef<AbortController | null>(null);
 
-  /* 加载标签列表 */
-  const loadTags = useCallback(async () => {
-    try {
-      const res = await tagApi.list();
-      setAllTags(res.items);
-    } catch {
-      // 静默失败
-    }
-  }, []);
-
   useEffect(() => {
     if (!id) return;
     setLoading(true);
@@ -346,7 +336,7 @@ export default function PaperDetail() {
     ): Promise<boolean> => {
       if (!id || !paper) return false;
       setProfileAnalyzing(true);
-      if (!options.keepTab) setReportTab("profile");
+      if (!options.keepTab) setReportTab("deep");
       try {
         const res = await compassApi.analyze({
           paper_id: id,
@@ -355,10 +345,10 @@ export default function PaperDetail() {
         });
         setProfileAnalysis(res);
         setProfileAnalysisStale(false);
-        if (!options.silent) toast("success", "画像解析完成");
+        if (!options.silent) toast("success", "个性化分析完成");
         return true;
       } catch {
-        if (!options.silent) toast("error", "画像解析失败");
+        if (!options.silent) toast("error", "个性化分析失败");
         return false;
       } finally {
         setProfileAnalyzing(false);
@@ -407,7 +397,9 @@ export default function PaperDetail() {
         if (updated.deep_report) setSavedDeep(updated.deep_report);
         const rc = updated.metadata?.reasoning_chain as ReasoningChainResult | undefined;
         if (rc) setReasoning(rc);
-      } catch {}
+      } catch {
+        // 精读报告已返回，详情刷新失败不阻断当前展示。
+      }
       const deepText = [
         report.method_summary,
         report.experiments_summary,
@@ -420,10 +412,10 @@ export default function PaperDetail() {
       toast(
         reasoningOk && profileOk ? "success" : "warning",
         reasoningOk && profileOk
-          ? "精读完成，画像解析已同步更新"
+          ? "精读完成，个性化分析已同步更新"
           : profileOk
-            ? "精读完成，画像解析已同步更新；推理链生成失败"
-            : "精读完成；画像解析同步失败，可稍后手动更新"
+            ? "精读完成，个性化分析已同步更新；推理链生成失败"
+            : "精读完成；个性化分析同步失败，可在精读报告中更新"
       );
     } catch {
       toast("error", "精读失败");
@@ -475,7 +467,9 @@ export default function PaperDetail() {
         try {
           await pipelineApi.embed(id);
           setEmbedDone(true);
-        } catch {}
+        } catch {
+          // 自动流程允许嵌入失败，后续粗读/精读仍可继续。
+        }
         setEmbedLoading(false);
       }
 
@@ -487,7 +481,9 @@ export default function PaperDetail() {
         try {
           const r = await pipelineApi.skim(id);
           setSkimReport(r);
-        } catch {}
+        } catch {
+          // 自动流程允许粗读失败，避免阻断已有 PDF 的精读。
+        }
         setSkimLoading(false);
       }
 
@@ -506,7 +502,9 @@ export default function PaperDetail() {
               const rc = await paperApi.reasoningAnalysis(id);
               setReasoning(rc.reasoning);
             }
-          } catch {}
+          } catch {
+            // 深度分析主体可能已完成，推理链失败由最终提示兜底。
+          }
           setDeepLoading(false);
         }
       }
@@ -525,21 +523,19 @@ export default function PaperDetail() {
             keepTab: true,
           });
         }
-      } catch {}
+      } catch {
+        // 详情刷新失败时保留当前页面已有结果。
+      }
       setAutoStage("");
       toast(
         profileSynced ? "success" : "warning",
-        profileSynced ? "深度分析完成，画像解析已同步更新" : "深度分析完成；画像解析同步失败"
+        profileSynced ? "深度分析完成，个性化分析已同步更新" : "深度分析完成；个性化分析同步失败"
       );
       setReportTab(paper.pdf_path ? "deep" : "skim");
     } finally {
       setAutoAnalyzing(false);
       setAutoStage("");
     }
-  };
-
-  const handleProfileAnalysis = async () => {
-    await syncProfileAnalysis();
   };
 
   const handleToggleFavorite = useCallback(async () => {
@@ -663,6 +659,7 @@ export default function PaperDetail() {
   const hasDeep = !!(savedDeep || deepReport);
   const hasReasoning = !!reasoning;
   const hasProfileAnalysis = !!profileAnalysis;
+  const hasCurrentProfileAnalysis = hasProfileAnalysis && !profileAnalysisStale;
   const hasSimilar = similarIds.length > 0;
 
   const skimStatus: "idle" | "loading" | "done" = skimLoading
@@ -670,7 +667,7 @@ export default function PaperDetail() {
     : hasSkim
       ? "done"
       : "idle";
-  const deepStatus: "idle" | "loading" | "done" = deepLoading
+  const deepStatus: "idle" | "loading" | "done" = deepLoading || profileAnalyzing
     ? "loading"
     : hasDeep || hasReasoning
       ? "done"
@@ -678,11 +675,6 @@ export default function PaperDetail() {
   const similarStatus: "idle" | "loading" | "done" = similarLoading
     ? "loading"
     : hasSimilar
-      ? "done"
-      : "idle";
-  const profileStatus: "idle" | "loading" | "done" = profileAnalyzing
-    ? "loading"
-    : hasProfileAnalysis
       ? "done"
       : "idle";
   const canUseArxivPdf = isArxivPaper(paper);
@@ -856,7 +848,7 @@ export default function PaperDetail() {
       {/* ========== 操作区：一键分析 + 主操作 + 辅助操作 ========== */}
       <div className="space-y-3">
         {/* 一键深度分析 */}
-        {!(hasSkim && hasDeep && hasReasoning) && (
+        {!(hasSkim && hasDeep && hasReasoning && hasCurrentProfileAnalysis) && (
           <button
             onClick={handleAutoAnalyze}
             disabled={autoAnalyzing}
@@ -973,14 +965,14 @@ export default function PaperDetail() {
           </button>
           <button
             onClick={handleDeep}
-            disabled={deepLoading || !paper.pdf_path}
+            disabled={deepLoading || profileAnalyzing || !paper.pdf_path}
             className="border-border bg-surface hover:border-primary/30 flex items-center gap-3 rounded-2xl border p-4 transition-all hover:shadow-md disabled:opacity-60"
             title={!paper.pdf_path ? "需要先下载 PDF 才能精读" : ""}
           >
             <div
               className={`flex h-10 w-10 items-center justify-center rounded-xl ${hasDeep ? "bg-success/10 text-success" : !paper.pdf_path ? "bg-ink-tertiary/10 text-ink-tertiary" : "bg-indigo-500/10 text-indigo-500"}`}
             >
-              {deepLoading ? (
+              {deepLoading || profileAnalyzing ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : hasDeep ? (
                 <Check className="h-5 w-5" />
@@ -990,14 +982,14 @@ export default function PaperDetail() {
             </div>
             <div className="text-left">
               <p className="text-ink text-sm font-semibold">
-                {hasDeep ? "已精读" : "精读 + 画像"}
+                {hasDeep ? "已精读" : "精读 + 个性化分析"}
               </p>
               <p className="text-ink-tertiary text-xs">
-                {deepLoading
-                  ? "精读、推理链与画像解析中..."
+                {deepLoading || profileAnalyzing
+                  ? "精读、推理链与个性化分析中..."
                   : !paper.pdf_path
                     ? "无 PDF，需先下载"
-                    : "方法论 + 实验 + 推理链 + 画像"}
+                    : "方法论 + 实验 + 推理链 + 个性化"}
               </p>
             </div>
           </button>
@@ -1005,26 +997,6 @@ export default function PaperDetail() {
 
         {/* 辅助操作 */}
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={handleProfileAnalysis}
-            disabled={profileAnalyzing || (hasProfileAnalysis && !profileAnalysisStale)}
-            className="border-border bg-surface text-ink-secondary hover:border-primary/30 hover:text-ink inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-all disabled:opacity-50"
-          >
-            {profileAnalyzing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : hasProfileAnalysis && !profileAnalysisStale ? (
-              <Check className="text-success h-3.5 w-3.5" />
-            ) : (
-              <Target className="h-3.5 w-3.5" />
-            )}
-            {profileAnalyzing
-              ? "画像解析中"
-              : profileAnalysisStale
-                ? "更新画像解析"
-                : hasProfileAnalysis
-                  ? "已画像解析"
-                  : "画像解析"}
-          </button>
           <button
             onClick={handleEmbed}
             disabled={embedLoading || embedDone === true}
@@ -1082,7 +1054,6 @@ export default function PaperDetail() {
           tabs={[
             { id: "skim", label: <TabLabel label="粗读" status={skimStatus} /> },
             { id: "deep", label: <TabLabel label="精读" status={deepStatus} /> },
-            { id: "profile", label: <TabLabel label="画像" status={profileStatus} /> },
             { id: "similar", label: <TabLabel label="相似" status={similarStatus} /> },
           ]}
           active={reportTab}
@@ -1200,6 +1171,12 @@ export default function PaperDetail() {
                         <ReasoningPanel reasoning={reasoning} />
                       </div>
                     )}
+                    <PersonalizedDeepAnalysisSection
+                      analysis={profileAnalysis}
+                      stale={profileAnalysisStale}
+                      loading={profileAnalyzing}
+                      onRefresh={() => syncProfileAnalysis()}
+                    />
                     <AnalysisAskBox
                       paperId={paper.id}
                       title="追问精读与推理链"
@@ -1254,6 +1231,12 @@ export default function PaperDetail() {
                         <ReasoningPanel reasoning={reasoning} />
                       </div>
                     )}
+                    <PersonalizedDeepAnalysisSection
+                      analysis={profileAnalysis}
+                      stale={profileAnalysisStale}
+                      loading={profileAnalyzing}
+                      onRefresh={() => syncProfileAnalysis()}
+                    />
                     <AnalysisAskBox
                       paperId={paper.id}
                       title="追问精读与推理链"
@@ -1274,32 +1257,6 @@ export default function PaperDetail() {
                       ? "点击「精读」按钮进行深度分析"
                       : "该论文没有 PDF 文件，无法精读（仅元数据入库的论文）"
                   }
-                />
-              )}
-            </div>
-          )}
-
-          {/* Tab: 画像 */}
-          {reportTab === "profile" && (
-            <div className="animate-fade-in">
-              {profileAnalyzing ? (
-                <div className="border-border bg-page/50 flex items-center justify-center gap-2 rounded-2xl border border-dashed py-16 text-sm text-ink-tertiary">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  正在结合用户画像解析这篇论文...
-                </div>
-              ) : profileAnalysis ? (
-                <div className="space-y-3">
-                  {profileAnalysisStale && (
-                    <div className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm">
-                      当前用户画像已变化。下方保留的是上一次画像解析结果，可点击“更新画像解析”重新生成。
-                    </div>
-                  )}
-                  <ProfileAnalysisCard analysis={profileAnalysis} />
-                </div>
-              ) : (
-                <EmptyReport
-                  icon={<Target className="h-8 w-8" />}
-                  label="精读完成后会自动生成画像解析；画像变化后可在这里更新"
                 />
               )}
             </div>
@@ -1624,6 +1581,67 @@ function EmptyReport({ icon, label }: { icon: React.ReactNode; label: string }) 
   );
 }
 
+function PersonalizedDeepAnalysisSection({
+  analysis,
+  stale,
+  loading,
+  onRefresh,
+}: {
+  analysis: CompassAnalysisResult | null;
+  stale: boolean;
+  loading: boolean;
+  onRefresh: () => void | Promise<void>;
+}) {
+  return (
+    <div className="border-border border-t pt-5">
+      {loading ? (
+        <div className="border-border bg-page/50 flex items-center justify-center gap-2 rounded-2xl border border-dashed py-10 text-sm text-ink-tertiary">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          正在结合用户画像生成个性化分析...
+        </div>
+      ) : analysis ? (
+        <div className="space-y-3">
+          {stale && (
+            <div className="border-warning/30 bg-warning/10 text-warning flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm">
+              <span>当前用户画像已变化。下方保留的是上一次个性化分析结果。</span>
+              <button
+                type="button"
+                onClick={onRefresh}
+                className="rounded-lg bg-warning/15 px-3 py-1 text-xs font-medium transition-colors hover:bg-warning/20"
+              >
+                更新个性化分析
+              </button>
+            </div>
+          )}
+          <ProfileAnalysisCard analysis={analysis} />
+        </div>
+      ) : (
+        <div className="border-border bg-page/50 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed px-4 py-5">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="bg-primary/10 text-primary flex h-9 w-9 shrink-0 items-center justify-center rounded-xl">
+              <Target className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-ink">基于画像的个性化分析</p>
+              <p className="mt-1 text-xs leading-5 text-ink-tertiary">
+                精读完成后会自动生成；如果缺失，可以在这里补生成。
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="border-border bg-surface text-ink-secondary hover:border-primary/30 hover:text-ink inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-all"
+          >
+            <Target className="h-3.5 w-3.5" />
+            生成个性化分析
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileAnalysisCard({ analysis }: { analysis: CompassAnalysisResult }) {
   const factors = Object.entries(analysis.recommendation.factors || {});
   const blocks = analysis.analysis_blocks || [];
@@ -1631,8 +1649,8 @@ function ProfileAnalysisCard({ analysis }: { analysis: CompassAnalysisResult }) 
   return (
     <Card className="rounded-2xl border-primary/20">
       <CardHeader
-        title="画像解析"
-        description={analysis.paper.plainSummary || "基于用户画像、论文摘要和当前学习权重生成"}
+        title="基于画像的个性化分析"
+        description={analysis.paper.plainSummary || "结合用户画像、论文摘要和精读内容生成"}
         action={
           <div className="bg-primary-light text-primary rounded-full px-3 py-1 text-sm font-bold">
             {Math.round(analysis.final_score)}

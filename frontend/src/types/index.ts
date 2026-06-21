@@ -98,65 +98,6 @@ export interface KeywordSuggestion {
   reason: string;
 }
 
-export interface DailyRadarPaper {
-  id: string;
-  title: string;
-  abstract: string;
-  arxiv_id?: string | null;
-  source?: string | null;
-  source_id?: string | null;
-  doi?: string | null;
-  publication_date?: string | null;
-  read_status?: string | null;
-  favorited?: boolean;
-}
-
-export interface DailyRadarItem {
-  paper: DailyRadarPaper;
-  score: number;
-  zone: "deep" | "quick" | "skip" | "";
-  tldr: string;
-  reason: string;
-  skip_reason: string;
-  matched_topics: Array<{ id: string; name: string }>;
-  scores: {
-    bm25: number;
-    embedding: number;
-    rrf: number;
-    profile: number;
-    freshness: number;
-    llm?: number | null;
-  };
-}
-
-export interface DailyRadarResponse {
-  generated_at: string;
-  content_id?: string | null;
-  title: string;
-  topics: Array<{
-    id: string;
-    name: string;
-    sources?: string[];
-    keywords?: QueryProfileKeyword[];
-    intent_queries?: QueryProfileIntent[];
-  }>;
-  summary: {
-    candidate_count: number;
-    ranked_count: number;
-    deep_count: number;
-    quick_count: number;
-    skip_count: number;
-    used_llm_refine: boolean;
-  };
-  stages: Array<{ name: string; count: number }>;
-  sections: {
-    deep: DailyRadarItem[];
-    quick: DailyRadarItem[];
-    skip: DailyRadarItem[];
-  };
-  markdown?: string;
-}
-
 export interface TopicStats {
   topic_id: string;
   topic_name: string;
@@ -458,7 +399,7 @@ export interface ReasoningAnalysisResponse {
 /* ========== 生成内容 ========== */
 export interface GeneratedContent {
   id: string;
-  content_type: "topic_wiki" | "paper_wiki" | "daily_radar";
+  content_type: "topic_wiki" | "paper_wiki";
   title: string;
   keyword?: string;
   paper_id?: string;
@@ -784,24 +725,6 @@ export interface PendingAction {
   tool: string;
   args: Record<string, unknown>;
   description: string;
-}
-
-/* ========== 今日速览 ========== */
-export interface TodaySummary {
-  today_new: number;
-  week_new: number;
-  total_papers: number;
-  recommendations: {
-    id: string;
-    title: string;
-    arxiv_id: string;
-    abstract: string;
-    similarity: number;
-    title_zh?: string;
-    keywords?: string[];
-    categories?: string[];
-  }[];
-  hot_keywords: { keyword: string; count: number }[];
 }
 
 /* ========== 论文列表 ========== */

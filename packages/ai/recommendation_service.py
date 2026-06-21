@@ -197,33 +197,3 @@ class TrendService:
             "hot_keywords": [{"keyword": kw, "count": c} for kw, c in recent_kw.most_common(10)],
             "emerging_trends": emerging[:10],
         }
-
-    def get_today_summary(self) -> dict:
-        """今日研究速览（5 分钟缓存）"""
-        hit = _cached("today_summary")
-        if hit is not None:
-            return hit
-        # 用用户时区的"今天 0:00"作为起始点，转为 UTC 与数据库比较
-        from packages.timezone import user_today_start_utc
-
-        today_start = user_today_start_utc()
-        week_start = today_start - timedelta(days=7)
-
-        with session_scope() as session:
-            repo = PaperRepository(session)
-            today_count = len(repo.list_recent_since(today_start, limit=100))
-            week_count = len(repo.list_recent_since(week_start, limit=500))
-            total_count = repo.count_all()
-
-        recommendations = RecommendationService().recommend(top_k=5)
-        hot_keywords = self.detect_hot_keywords(days=7, top_k=8)
-
-        result = {
-            "today_new": today_count,
-            "week_new": week_count,
-            "total_papers": total_count,
-            "recommendations": recommendations,
-            "hot_keywords": hot_keywords,
-        }
-        _set_cache("today_summary", result)
-        return result

@@ -24,9 +24,7 @@ import type {
   ArxivPreviewResponse,
   KeywordSuggestion,
   ReasoningAnalysisResponse,
-  TodaySummary,
   FolderStats,
-  TopicStats,
   TopicStatsResponse,
   PaperDistributionResponse,
   PaperListResponse,
@@ -43,8 +41,6 @@ import type {
   MultiSourceSearchResult,
   ChannelSuggestion,
   Tag,
-  TagCreate,
-  TagUpdate,
   CompassBackend,
   CompassAnalysisResult,
   CompassPaperAnalysisResponse,
@@ -52,11 +48,9 @@ import type {
   CompassProfileResponse,
   CompassPreferenceModel,
   CompassQueueResponse,
-  DailyRadarResponse,
 } from "@/types";
 
 export type {
-  TodaySummary,
   TopicFetchResult,
   FolderStats,
   PaperListResponse,
@@ -152,7 +146,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       },
       ...options,
     });
-  } catch (e) {
+  } catch {
     throw new Error("网络连接失败，请检查后端服务是否启动");
   }
   if (!resp.ok) {
@@ -203,10 +197,6 @@ function del<T>(path: string, opts?: { signal?: AbortSignal }) {
 export const systemApi = {
   health: () => get<{ status: string; app: string; env: string }>("/health"),
   status: () => get<SystemStatus>("/system/status"),
-};
-
-export const todayApi = {
-  summary: () => get<TodaySummary>("/today"),
 };
 
 /* ========== 主题 ========== */
@@ -404,14 +394,6 @@ export const compassApi = {
       data
     ),
   resetModel: () => post<{ model: CompassQueueResponse["model"] }>("/recommendation/model/reset"),
-};
-
-/* ========== 摄入 ========== */
-
-export const dailyRadarApi = {
-  latest: (limit = 30) => get<DailyRadarResponse>(`/recommendation/daily-radar?limit=${limit}`),
-  run: (data?: { limit?: number; topic_ids?: string[]; use_llm?: boolean }) =>
-    post<DailyRadarResponse>("/recommendation/daily-radar/run", data ?? {}),
 };
 
 export const ingestApi = {

@@ -4,23 +4,18 @@
  */
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Badge } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { StatCardSkeleton } from "@/components/Skeleton";
 import { useGlobalTasks } from "@/contexts/GlobalTaskContext";
-import { systemApi, metricsApi, pipelineApi, todayApi } from "@/services/api";
+import { systemApi, metricsApi, pipelineApi } from "@/services/api";
 import { formatDuration, timeAgo } from "@/lib/utils";
-import type { SystemStatus, CostMetrics, PipelineRun, TodaySummary } from "@/types";
+import type { SystemStatus, CostMetrics, PipelineRun } from "@/types";
 import {
   Activity,
   FileText,
-  AlertTriangle,
-  CheckCircle2,
   XCircle,
-  Clock,
   RefreshCw,
-  TrendingUp,
   Zap,
-  Sparkles,
   ArrowUpRight,
   BarChart3,
   Cpu,
@@ -75,7 +70,6 @@ export default function Dashboard() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [costs, setCosts] = useState<CostMetrics | null>(null);
   const [runs, setRuns] = useState<PipelineRun[]>([]);
-  const [today, setToday] = useState<TodaySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [costDays, setCostDays] = useState<number>(7);
@@ -84,16 +78,14 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [s, c, r, t] = await Promise.all([
+      const [s, c, r] = await Promise.all([
         systemApi.status(),
         metricsApi.costs(costDays),
         pipelineApi.runs(10),
-        todayApi.summary().catch(() => null),
       ]);
       setStatus(s);
       setCosts(c);
       setRuns(r.items);
-      setToday(t);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {
@@ -121,9 +113,7 @@ export default function Dashboard() {
   }
 
   const isHealthy = status?.health?.status === "ok";
-  const todayNew = today?.today_new ?? 0;
-  const weekNew = today?.week_new ?? 0;
-  const totalPapers = today?.total_papers ?? status?.counts?.papers_latest_200 ?? 0;
+  const totalPapers = status?.counts?.papers_latest_200 ?? 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -170,17 +160,17 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
           icon={<FileText className="h-5 w-5" />}
-          label="今日新增"
-          value={todayNew}
-          sub={`本周 ${weekNew} 篇`}
+          label="论文总量"
+          value={totalPapers}
+          sub="最近入库论文"
           color="primary"
           onClick={() => navigate("/papers")}
         />
         <StatCard
           icon={<BookOpen className="h-5 w-5" />}
-          label="论文总量"
-          value={totalPapers}
-          sub={`${status?.counts?.enabled_topics ?? 0} 个订阅`}
+          label="主题订阅"
+          value={status?.counts?.enabled_topics ?? 0}
+          sub="已启用主题"
           color="info"
           onClick={() => navigate("/papers")}
         />
@@ -266,7 +256,6 @@ export default function Dashboard() {
                       ...costs.by_stage.map((x) => (x.input_tokens ?? 0) + (x.output_tokens ?? 0)),
                       1
                     );
-                    const pct = Math.max((stageTotal / maxTokens) * 100, 3);
                     return (
                       <div key={s.stage} className="group">
                         <div className="mb-1 flex items-center justify-between">
@@ -404,29 +393,6 @@ export default function Dashboard() {
             </SectionCard>
           )}
 
-          {/* 推荐论文 */}
-          {today && today.recommendations.length > 0 && (
-            <SectionCard title="推荐阅读" icon={<Sparkles className="text-warning h-4 w-4" />}>
-              <div className="space-y-2">
-                {today.recommendations.slice(0, 4).map((rec) => (
-                  <button
-                    key={rec.id}
-                    onClick={() => navigate(`/papers/${rec.id}`)}
-                    className="block w-full text-left"
-                  >
-                    <div className="bg-page hover:bg-hover rounded-xl p-3 transition-colors">
-                      <p className="text-ink mb-1 line-clamp-2 text-xs font-medium">
-                        {rec.title_zh || rec.title}
-                      </p>
-                      <p className="text-ink-tertiary text-[10px]">
-                        相似度 {(rec.similarity * 100).toFixed(0)}%
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </SectionCard>
-          )}
         </div>
       </div>
     </div>

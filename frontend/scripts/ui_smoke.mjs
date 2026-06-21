@@ -6,11 +6,9 @@ const password = process.env.AUTH_PASSWORD || "";
 const routes = [
   { path: "/", name: "Agent" },
   { path: "/recommendation", name: "Compass" },
-  { path: "/radar", name: "DailyRadar" },
   { path: "/papers", name: "Papers" },
   { path: "/collect", name: "Collect" },
   { path: "/wiki", name: "Wiki" },
-  { path: "/brief", name: "DailyBrief" },
   { path: "/dashboard", name: "Dashboard" },
   { path: "/statistics", name: "Statistics" },
   { path: "/settings", name: "Settings" },

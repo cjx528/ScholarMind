@@ -40,7 +40,6 @@
 当前主页面：
 
 - `frontend/src/pages/Compass.tsx`
-- `frontend/src/pages/DailyRadar.tsx`
 - `frontend/src/pages/Collect.tsx`
 - `frontend/src/pages/Dashboard.tsx`
 - `frontend/src/pages/Papers.tsx`
@@ -56,18 +55,15 @@
 3. `/collect` 选择论文源并发起统一多源搜索。
 4. `apps/api/routers/topics.py` 调用 `packages/integrations/aggregator.py` 与各渠道客户端返回候选论文。
 5. 候选论文先按相关性和主题归类展示，用户确认后通过 `/ingest/search/selected` 入库并关联主题。
-6. `packages/ai/daily_radar_service.py` 生成研究雷达分区。
-7. 用户反馈通过 `/recommendation/feedback` 影响后续排序。
+6. 用户反馈通过 `/recommendation/feedback` 影响后续排序。
 
 相关文件：
 
 - `frontend/src/pages/Compass.tsx`
-- `frontend/src/pages/DailyRadar.tsx`
 - `frontend/src/pages/Collect.tsx`
 - `apps/api/routers/recommendation.py`
 - `apps/api/routers/topics.py`
 - `packages/ai/compass_service.py`
-- `packages/ai/daily_radar_service.py`
 - `packages/ai/daily_runner.py`
 - `packages/integrations/`
 
@@ -75,7 +71,7 @@
 
 1. 用户在 `/papers` 进入论文详情。
 2. 后端加载论文元数据、摘要、PDF 路径和已有分析结果。
-3. 用户可以触发粗读、精读、推理链和相似论文。
+3. 用户可以触发粗读、精读、基于画像的个性化分析、推理链和相似论文。
 4. PDF 阅读器中的 AI 助手调用 `POST /papers/{paper_id}/ask`。
 5. 后端按优先级拼接选中文本、论文元数据、粗读、精读、推理链和 PDF 附近文本。
 6. LLM 返回中文回答，并标注使用到的上下文类型。

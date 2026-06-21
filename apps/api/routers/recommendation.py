@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from packages.ai.compass_service import CompassService
-from packages.ai.daily_radar_service import DailyRadarService
 
 router = APIRouter(prefix="/recommendation", tags=["recommendation"])
 
@@ -46,12 +45,6 @@ class FeedbackRequest(BaseModel):
     notes: str | None = None
     factors: dict[str, Any] | None = None
     base_score: float | None = None
-
-
-class DailyRadarRunRequest(BaseModel):
-    limit: int = Field(default=30, ge=5, le=80)
-    topic_ids: list[str] | None = None
-    use_llm: bool = True
 
 
 @router.get("/profile")
@@ -106,20 +99,6 @@ def paper_analysis(paper_id: str) -> dict:
 @router.get("/queue")
 def queue(top_k: int = Query(default=20, ge=1, le=100)) -> dict:
     return CompassService().queue(top_k=top_k)
-
-
-@router.get("/daily-radar")
-def daily_radar(limit: int = Query(default=30, ge=5, le=80)) -> dict:
-    return DailyRadarService().latest(limit=limit)
-
-
-@router.post("/daily-radar/run")
-def run_daily_radar(req: DailyRadarRunRequest) -> dict:
-    return DailyRadarService().run(
-        limit=req.limit,
-        topic_ids=req.topic_ids,
-        use_llm=req.use_llm,
-    )
 
 
 @router.post("/feedback")

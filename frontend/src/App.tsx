@@ -17,7 +17,6 @@ import AgentPage from "@/pages/Agent";
 /* 其余页面全部懒加载，按需拆 chunk */
 const Collect = lazy(() => import("@/pages/Collect"));
 const Compass = lazy(() => import("@/pages/Compass"));
-const DailyRadar = lazy(() => import("@/pages/DailyRadar"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Papers = lazy(() => import("@/pages/Papers"));
 const PaperDetail = lazy(() => import("@/pages/PaperDetail"));
@@ -26,7 +25,7 @@ const Statistics = lazy(() => import("@/pages/Statistics"));
 const Settings = lazy(() => import("@/pages/Settings"));
 
 import LoginPage from "@/pages/Login";
-import { isAuthenticated as checkAuth, clearAuth } from "@/services/api";
+import { isAuthenticated as checkAuth } from "@/services/api";
 import { useState, useCallback } from "react";
 
 function PageFallback() {
@@ -75,11 +74,6 @@ export default function App() {
     setIsAuthed(true);
   }, []);
 
-  const handleLogout = useCallback(() => {
-    clearAuth();
-    setIsAuthed(false);
-  }, []);
-
   // 未认证时显示登录页
   if (!isAuthed) {
     return (
@@ -100,7 +94,6 @@ export default function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<AgentPage />} />
           <Route path="/recommendation" element={<Suspense fallback={<PageFallback />}><Compass /></Suspense>} />
-          <Route path="/radar" element={<Suspense fallback={<PageFallback />}><DailyRadar /></Suspense>} />
           <Route path="/collect" element={<Suspense fallback={<PageFallback />}><Collect /></Suspense>} />
           <Route path="/dashboard" element={<Suspense fallback={<PageFallback />}><Dashboard /></Suspense>} />
           <Route path="/papers" element={<Suspense fallback={<PageFallback />}><Papers /></Suspense>} />
